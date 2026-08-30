@@ -1,0 +1,3091 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Monopoly Bank v1</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --felt: #0f3d2e;
+            --felt-deep: #0a2a20;
+            --cream: #f4efe4;
+            --paper: #fffdf8;
+            --ink: #1a2e24;
+            --muted: #5c6f66;
+        }
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+            background: var(--cream);
+            background-image: radial-gradient(ellipse 120% 80% at 50% -20%, #d8e8d8 0%, transparent 55%);
+            min-height: 100vh;
+            padding-bottom: 96px;
+            color: var(--ink);
+            touch-action: manipulation;
+        }
+        body.has-fab { padding-bottom: 168px; }
+        body.on-board { padding-bottom: 248px; }
+        .app-header {
+            position: sticky; top: 0; z-index: 30;
+            background: rgba(244, 239, 228, 0.92);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(15, 61, 46, 0.08);
+        }
+        .brand-mark {
+            width: 40px; height: 40px; border-radius: 12px;
+            background: var(--felt); color: #e8c547;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 12px rgba(15, 61, 46, 0.25);
+        }
+        .header-add {
+            width: 44px; height: 44px; border-radius: 14px; border: none;
+            background: var(--felt); color: #fff; font-size: 16px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .header-watch {
+            border: none; background: transparent; cursor: pointer;
+            font-family: inherit; padding: 0; text-align: right;
+        }
+        .add-player-fab {
+            position: fixed; right: 16px; z-index: 45;
+            bottom: calc(88px + env(safe-area-inset-bottom));
+            width: 56px; height: 56px; border-radius: 18px; border: none;
+            background: var(--felt); color: #fff; font-size: 20px;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 8px 24px rgba(15, 61, 46, 0.35);
+        }
+        .add-player-fab.hidden { display: none; }
+        .header-player-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+        .name-badge {
+            font-size: 12px; font-weight: 800; padding: 5px 10px;
+            border-radius: 999px; max-width: min(46vw, 180px); overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap;
+        }
+        .header-balance {
+            font-size: 16px; font-weight: 800; color: var(--felt);
+            white-space: nowrap; line-height: 1.2;
+        }
+        .color-swatch-row { display: flex; flex-wrap: wrap; gap: 8px; }
+        .color-swatch {
+            width: 36px; height: 36px; border-radius: 12px; border: 3px solid transparent;
+            cursor: pointer; padding: 0;
+        }
+        .color-swatch.selected { border-color: var(--ink); box-shadow: 0 0 0 2px #fff inset; }
+        .bottom-nav {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: var(--paper);
+            border-top: 1px solid rgba(15, 61, 46, 0.08);
+            display: flex; justify-content: space-around; align-items: center;
+            padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
+            z-index: 40; box-shadow: 0 -8px 28px rgba(15, 61, 46, 0.08);
+        }
+        .nav-item {
+            display: flex; flex-direction: column; align-items: center; gap: 3px;
+            padding: 8px 6px; border-radius: 16px; min-width: 52px; min-height: 52px;
+            cursor: pointer; border: none; background: transparent;
+        }
+        .nav-item .nav-icon { font-size: 18px; color: #8a9a93; }
+        .nav-item .nav-label { font-size: 10px; font-weight: 700; color: #8a9a93; }
+        .nav-item.active { background: var(--felt); }
+        .nav-item.active .nav-icon, .nav-item.active .nav-label { color: #f4efe4; }
+        .player-card, .prop-card, .tx-item, .hero-card, .settings-card, .empty-card {
+            background: var(--paper);
+            border-radius: 18px;
+            box-shadow: 0 2px 10px rgba(15, 61, 46, 0.06);
+        }
+        .hero-card {
+            padding: 18px 18px 16px;
+            background: linear-gradient(145deg, var(--felt) 0%, var(--felt-deep) 100%);
+            color: #f4efe4;
+            display: flex; justify-content: space-between; align-items: flex-end;
+        }
+        .player-card {
+            padding: 14px 14px 14px 14px; display: flex; align-items: center; gap: 12px;
+            border: 2px solid transparent; width: 100%; text-align: left; cursor: pointer;
+        }
+        .player-card.bankrupt { opacity: .5; filter: grayscale(.4); }
+        .player-avatar {
+            width: 48px; height: 48px; border-radius: 16px; display: flex; align-items: center; justify-content: center;
+            font-weight: 800; color: #fff; flex-shrink: 0; font-size: 18px;
+        }
+        .chip {
+            font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 9999px;
+            background: #eef3ef; color: var(--felt);
+        }
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(10, 42, 32, .55); backdrop-filter: blur(8px);
+            z-index: 60; display: flex; align-items: flex-end; justify-content: center; padding: 0;
+        }
+        .modal-content {
+            background: var(--paper); border-radius: 24px 24px 0 0; width: 100%; max-width: 560px;
+            max-height: 96vh; overflow-y: auto;
+            padding: 4px 16px calc(14px + env(safe-area-inset-bottom));
+            position: relative;
+        }
+        .modal-content .section-label { margin: 8px 0 4px; }
+        .modal-content .btn { min-height: 42px; padding: 10px 14px; font-size: 14px; }
+        .modal-content .player-grid { gap: 6px; }
+        .modal-content .player-option { padding: 6px 2px; }
+        .modal-content .player-option .p-avatar { width: 30px; height: 30px; font-size: 12px; border-radius: 10px; }
+        .modal-content .qa { min-height: 72px; padding: 10px 8px; font-size: 12px; }
+        .modal-content .qa i { font-size: 18px; }
+        .modal-handle {
+            width: 40px; height: 4px; border-radius: 99px; background: #d6d0c4;
+            margin: 4px auto 8px;
+        }
+        .modal-close {
+            position: absolute; top: 10px; right: 10px; width: 40px; height: 40px;
+            border: none; background: #dc2626; border-radius: 12px; color: #fff;
+            box-shadow: 0 2px 8px rgba(220, 38, 38, 0.35);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-close:hover, .modal-close:focus { background: #b91c1c; color: #fff; }
+        @media (min-width: 640px) {
+            .modal-overlay { align-items: center; padding: 12px; }
+            .modal-content { border-radius: 24px; max-height: 94vh; }
+        }
+        .input-field, .select-field {
+            width: 100%; padding: 14px 16px; border-radius: 14px; border: 2px solid #e4ddd0;
+            font-size: 16px; background: #faf8f3; outline: none; font-family: inherit; color: var(--ink);
+        }
+        .input-field:focus, .select-field:focus { border-color: var(--felt); }
+        .select-field { appearance: none; }
+        .btn {
+            border: none; padding: 14px 18px; border-radius: 14px;
+            font-size: 15px; font-weight: 800; width: 100%; min-height: 52px;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            font-family: inherit; cursor: pointer;
+        }
+        .btn-primary { background: var(--felt); color: #fff; }
+        .btn-go { background: #d97706; color: #fff; }
+        .btn-pay, .btn-rent { background: #dc2626; color: #fff; }
+        .btn-recv { background: #16a34a; color: #fff; }
+        .btn-xfer { background: #2563eb; color: #fff; }
+        .btn-build { background: #0d9488; color: #fff; }
+        .btn-hotel { background: #7c3aed; color: #fff; }
+        .btn-mortgage { background: #ea580c; color: #fff; }
+        .btn-danger { background: #b91c1c; color: #fff; }
+        .btn-ghost, .btn-secondary {
+            background: #efe9dc; color: #334155; font-weight: 700;
+        }
+        .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; }
+        .player-option {
+            background: #fff; border: 2px solid #e4ddd0; border-radius: 14px; padding: 10px 4px;
+            display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
+            cursor: pointer;
+        }
+        .player-option.selected { border-color: var(--felt); background: #e8f2eb; box-shadow: 0 0 0 2px rgba(15,61,46,.15); }
+        .player-option .p-avatar {
+            width: 36px; height: 36px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+            font-weight: 800; font-size: 14px; color: #fff;
+        }
+        .player-option .pname { font-size: 10px; font-weight: 700; color: #475569; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .quick-action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .qa {
+            border: none; border-radius: 18px; padding: 16px 10px; min-height: 96px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+            font-weight: 800; font-size: 13px; color: #fff; font-family: inherit; cursor: pointer;
+        }
+        .qa i { font-size: 22px; }
+        .qa-go { background: #d97706; }
+        .qa-pay { background: #dc2626; }
+        .qa-recv { background: #16a34a; }
+        .qa-xfer { background: #2563eb; }
+        .toast {
+            position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%);
+            background: var(--felt); color: #fff; padding: 12px 20px; border-radius: 14px;
+            font-size: 14px; font-weight: 700; z-index: 100; max-width: 85vw; text-align: center;
+        }
+        .toast.success { background: #16a34a; }
+        .toast.error { background: #dc2626; }
+        .prop-card { padding: 0; overflow: hidden; border: 1px solid #ebe4d6; min-height: 100%; text-align: left; cursor: pointer; }
+        .prop-strip { height: 8px; }
+        .asset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .prop-name {
+            font-weight: 800; font-size: 12px; line-height: 1.25;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .code-badge {
+            display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.04em;
+            background: var(--felt); color: #f4efe4; border-radius: 6px; padding: 2px 6px;
+        }
+        .amt-wrap { position: relative; }
+        .amt-wrap .input-field { padding-right: 68px; }
+        .amt-max {
+            position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+            border: none; background: var(--felt); color: #fff;
+            font-size: 11px; font-weight: 800; letter-spacing: .04em;
+            border-radius: 10px; padding: 8px 10px; min-height: 32px; cursor: pointer;
+        }
+        .stock-chip {
+            flex: 1; background: var(--paper); padding: 10px 12px; border-radius: 14px;
+            font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+            box-shadow: 0 2px 8px rgba(15,61,46,.05);
+        }
+        .asset-search-wrap {
+            position: fixed; left: 0; right: 0; z-index: 35;
+            bottom: calc(80px + env(safe-area-inset-bottom));
+            padding: 10px 16px 14px;
+            background: linear-gradient(to top, var(--cream) 78%, rgba(244,239,228,0));
+            max-width: 48rem; margin: 0 auto;
+        }
+        .search-inner { position: relative; }
+        .search-inner i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #8a9a93; }
+        .search-inner .input-field { padding-left: 42px; }
+        .search-chip-row {
+            display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px;
+            -webkit-overflow-scrolling: touch; scrollbar-width: none;
+        }
+        .search-chip-row::-webkit-scrollbar { display: none; }
+        .search-suggest {
+            flex-shrink: 0; border: none; border-radius: 999px;
+            font-size: 11px; font-weight: 800; padding: 6px 11px;
+            font-family: inherit; cursor: pointer; color: #fff;
+        }
+        .search-suggest.bank { background: #64748b; color: #fff; }
+        .search-suggest.active { box-shadow: 0 0 0 2px var(--ink); }
+        .view { display: none; }
+        .view.active { display: block; }
+        .badge { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 9999px; }
+        .section-label { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 8px; }
+        .tx-go { border-left: 4px solid #d97706; }
+        .tx-pay, .tx-rent { border-left: 4px solid #dc2626; }
+        .tx-recv { border-left: 4px solid #16a34a; }
+        .tx-p2p { border-left: 4px solid #2563eb; }
+        .tx-buy, .tx-house, .tx-hotel { border-left: 4px solid #0d9488; }
+        .tx-mortgage, .tx-unmortgage { border-left: 4px solid #ea580c; }
+        .tx-deed, .tx-return { border-left: 4px solid #64748b; }
+        .empty-card { padding: 36px 20px; text-align: center; border: 2px dashed #d6d0c4; }
+        .settings-card { padding: 18px; }
+        #moneyFxLayer {
+            position: fixed; inset: 0; z-index: 120; display: none;
+            pointer-events: none;
+        }
+        #moneyFxLayer.open {
+            display: flex; align-items: stretch; justify-content: center;
+        }
+        #moneyFxLayer.ready { pointer-events: auto; }
+        .fx-screen {
+            width: 100%; min-height: 100%;
+            background: rgba(10, 42, 32, 0.92);
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: space-between;
+            padding: calc(28px + env(safe-area-inset-top)) 24px calc(28px + env(safe-area-inset-bottom));
+            position: relative; overflow: hidden;
+        }
+        .fx-party { z-index: 2; width: 100%; max-width: 340px; }
+        .fx-card {
+            background: var(--paper);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 12px 40px rgba(0,0,0,.28);
+            width: 100%;
+        }
+        .fx-card .fx-strip { height: 7px; }
+        .fx-from .fx-strip { background: #dc2626; }
+        .fx-to .fx-strip { background: #16a34a; }
+        .fx-card-body { padding: 14px 16px 16px; }
+        .fx-role {
+            display: inline-block;
+            font-size: 10px; font-weight: 800; letter-spacing: .12em;
+            padding: 3px 9px; border-radius: 999px; margin-bottom: 10px;
+        }
+        .fx-from .fx-role { background: #fee2e2; color: #b91c1c; }
+        .fx-to .fx-role { background: #dcfce7; color: #15803d; }
+        .fx-card-row { display: flex; align-items: center; gap: 12px; }
+        .fx-avatar {
+            width: 56px; height: 56px; border-radius: 16px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 800; font-size: 22px; color: #fff; flex-shrink: 0;
+        }
+        .fx-avatar.bank { background: var(--felt); color: #e8c547; }
+        .fx-meta { min-width: 0; flex: 1; }
+        .fx-name { color: var(--ink); font-weight: 800; font-size: 17px; }
+        .fx-bal { font-size: 20px; font-weight: 800; margin-top: 2px; }
+        .fx-bal.fx-down { color: #dc2626; }
+        .fx-bal.fx-up { color: #16a34a; }
+        .fx-mid {
+            z-index: 2; text-align: center; position: relative;
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
+        }
+        .fx-amount { font-size: 42px; font-weight: 800; color: #e8c547; letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
+        .fx-amount.down { color: #f87171; }
+        .fx-amount.up { color: #4ade80; }
+        .fx-amount.buy { color: #86efac; }
+        .fx-ctx {
+            color: #f4efe4; font-size: 18px; font-weight: 800; line-height: 1.25;
+            max-width: 320px;
+        }
+        .fx-ctx-sub { color: rgba(244,239,228,.75); font-size: 13px; font-weight: 700; max-width: 320px; }
+        .fx-prop-card {
+            background: var(--paper); border-radius: 16px; overflow: hidden;
+            width: 100%; max-width: 280px; text-align: left;
+            box-shadow: 0 8px 28px rgba(0,0,0,.28);
+        }
+        .fx-prop-card .fx-prop-name { font-weight: 800; font-size: 15px; color: var(--ink); margin-top: 6px; }
+        .fx-hint { color: rgba(244,239,228,.85); font-size: 13px; font-weight: 700; min-height: 20px; opacity: 0; }
+        .role-overlay {
+            position: fixed; inset: 0; z-index: 90;
+            background: rgba(10, 42, 32, .72); backdrop-filter: blur(10px);
+            display: flex; align-items: flex-end; justify-content: center;
+        }
+        .role-overlay.role-pick {
+            align-items: center;
+            padding: 16px;
+        }
+        .role-overlay.role-pick .role-card {
+            border-radius: 24px;
+            padding: 22px 18px;
+        }
+        .btn-player-role { background: var(--felt); color: #fff; }
+        .role-card {
+            background: var(--paper); width: 100%; max-width: 560px;
+            border-radius: 24px 24px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom));
+        }
+        @media (min-width: 640px) {
+            .role-overlay { align-items: center; padding: 16px; }
+            .role-card { border-radius: 24px; }
+        }
+        .player-chip {
+            font-size: 10px; font-weight: 800; letter-spacing: .08em;
+            background: #e8c547; color: var(--felt); padding: 3px 8px; border-radius: 999px;
+        }
+        .req-head {
+            display: flex; align-items: center; gap: 12px; color: #fff;
+            padding: 16px 16px 18px; margin: -20px -18px 16px; border-radius: 24px 24px 0 0;
+        }
+        @media (min-width: 640px) {
+            .req-head { border-radius: 24px 24px 0 0; }
+        }
+        .req-icon {
+            width: 48px; height: 48px; border-radius: 14px; flex-shrink: 0;
+            background: rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center;
+            font-size: 22px;
+        }
+        .req-amt { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; margin: 4px 0 12px; }
+        .req-row {
+            display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+            padding: 8px 0; border-bottom: 1px solid #ebe4d6; font-size: 13px;
+        }
+        .req-row span { color: var(--muted); font-weight: 700; flex-shrink: 0; }
+        .req-row b { text-align: right; font-weight: 800; }
+        .req-av {
+            display: inline-flex; width: 22px; height: 22px; border-radius: 7px; align-items: center; justify-content: center;
+            color: #fff; font-size: 11px; font-weight: 800; vertical-align: middle; margin-right: 4px;
+        }
+        .req-player-tag {
+            display: inline-flex; align-items: center; gap: 6px;
+            color: #fff !important; font-size: 12px; font-weight: 800;
+            border-radius: 999px; padding: 3px 10px 3px 4px; vertical-align: middle;
+        }
+        .req-list-strip { height: 6px; border-radius: 8px 8px 0 0; margin: -12px -12px 10px; }
+        .tx-item.req-list { padding-top: 12px; overflow: hidden; }
+        #debtOverlay .role-card {
+            max-height: 100dvh;
+            overflow: hidden;
+            padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+        }
+        .debt-head {
+            display: flex; align-items: center; gap: 10px; color: #fff;
+            padding: 10px 12px; margin: -12px -14px 10px; border-radius: 24px 24px 0 0;
+            background: #ea580c;
+        }
+        @media (min-width: 640px) {
+            .debt-head { border-radius: 24px 24px 0 0; }
+        }
+        .debt-head .req-icon { width: 36px; height: 36px; font-size: 16px; border-radius: 10px; }
+        .debt-stats {
+            display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 8px;
+        }
+        .debt-stat {
+            background: #f6f1e6; border-radius: 10px; padding: 6px 8px;
+        }
+        .debt-stat span { display: block; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+        .debt-stat b { display: block; font-size: 14px; font-weight: 800; margin-top: 1px; color: var(--ink); }
+        .debt-stat.debt-stat-need b { color: #c2410c; }
+        .debt-meter {
+            height: 6px; border-radius: 999px; background: #ebe4d6; overflow: hidden; margin: 0 0 8px;
+        }
+        .debt-meter > i {
+            display: block; height: 100%; border-radius: 999px; background: #16a34a;
+            min-width: 0;
+        }
+        .debt-list {
+            display: grid; grid-template-columns: 1fr; gap: 6px;
+            overflow: hidden;
+        }
+        .debt-list.debt-list-dense { grid-template-columns: 1fr 1fr; }
+        .debt-row {
+            display: flex; align-items: center; gap: 8px;
+            background: #fff; border: 1px solid #ebe4d6; border-radius: 10px;
+            padding: 6px 8px 6px 0; min-height: 40px; overflow: hidden;
+        }
+        .debt-row-strip { width: 5px; align-self: stretch; border-radius: 10px 0 0 10px; flex-shrink: 0; }
+        .debt-row-main { flex: 1; min-width: 0; }
+        .debt-row-name {
+            font-weight: 800; font-size: 12px; color: var(--ink); line-height: 1.2;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .debt-row-meta { font-size: 10px; font-weight: 700; color: var(--muted); }
+        .debt-cta {
+            flex-shrink: 0; min-height: 36px; border: none; border-radius: 9px;
+            font-weight: 800; font-size: 11px; cursor: pointer; padding: 6px 8px;
+            white-space: nowrap;
+        }
+        .debt-cta-in { background: #16a34a; color: #fff; }
+        .debt-cta-lock { background: #f3efe6; color: var(--muted); cursor: default; font-size: 10px; }
+        .debt-mort-sum {
+            font-size: 12px; font-weight: 700; color: var(--muted); padding: 4px 2px 0;
+        }
+        .fx-bill {
+            position: fixed; left: 0; top: 0; font-size: 26px; color: #86efac;
+            text-shadow: 0 2px 8px rgba(0,0,0,.35); pointer-events: none; z-index: 1;
+        }
+    </style>
+</head>
+<body>
+    <header class="app-header">
+        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="brand-mark" aria-hidden="true"><i class="fa-solid fa-landmark"></i></div>
+                <div>
+                    <p class="font-extrabold text-base leading-tight" style="color:var(--ink)">Monopoly Bank</p>
+                    <p id="brandSub" class="text-[10px] font-bold tracking-wide" style="color:var(--muted)">by EnricoNQB</p>
+                </div>
+            </div>
+            <div id="headerRight" class="header-right"></div>
+        </div>
+    </header>
+
+    <main class="max-w-3xl mx-auto px-4 pt-4">
+        <section id="view-players" class="view active"></section>
+        <section id="view-board" class="view"></section>
+        <section id="view-cash" class="view"></section>
+        <section id="view-settings" class="view"></section>
+        <section id="view-queue" class="view"></section>
+    </main>
+
+    <nav class="bottom-nav" id="appNav">
+        <button type="button" class="nav-item active" data-view="players" onclick="showView('players')">
+            <span class="nav-icon"><i class="fa-solid fa-users"></i></span>
+            <span class="nav-label">Pemain</span>
+        </button>
+        <button type="button" class="nav-item" data-view="board" onclick="showView('board')">
+            <span class="nav-icon"><i class="fa-solid fa-building"></i></span>
+            <span class="nav-label">Aset</span>
+        </button>
+        <button type="button" class="nav-item" data-view="cash" onclick="showView('cash')">
+            <span class="nav-icon"><i class="fa-solid fa-money-bill-transfer"></i></span>
+            <span class="nav-label">Kas</span>
+        </button>
+        <button type="button" class="nav-item" data-view="settings" onclick="showView('settings')">
+            <span class="nav-icon"><i class="fa-solid fa-gear"></i></span>
+            <span class="nav-label">Setelan</span>
+        </button>
+    </nav>
+
+    <button type="button" id="addPlayerFab" class="add-player-fab hidden" onclick="openAddPlayerModal()" title="Tambah pemain">
+        <i class="fa-solid fa-user-plus"></i>
+    </button>
+
+    <div id="roleOverlay" class="role-overlay role-pick hidden"></div>
+    <div id="requestOverlay" class="role-overlay hidden"></div>
+    <div id="debtOverlay" class="role-overlay hidden"></div>
+    <div id="modalContainer"></div>
+    <div id="toastContainer"></div>
+    <div id="moneyFxLayer" aria-hidden="true"></div>
+
+<script>
+const STORAGE_KEY = 'mb_v1_state';
+const SESSION_KEY = 'mb_v1_session';
+const FX_SEEN_KEY = 'mb_v1_lastFx';
+const SOUND_MUTE_KEY = 'mb_v1_soundMute';
+const WATCH_KEY = 'mb_v1_watchPlayer';
+const SAVE_URL = 'save.php';
+const PLAYER_COLORS = ['#D32F2F','#1565C0','#2E7D32','#F9A825','#6A1B9A','#E65100','#AD1457','#00695C','#4E342E','#37474F'];
+const GROUP_META = {
+    brown: { label: 'Magenta', color: '#c2187d' },
+    lightblue: { label: 'Biru muda', color: '#7ec8e3' },
+    purple: { label: 'Ungu', color: '#7b2cbf' },
+    orange: { label: 'Oranye', color: '#f7941d' },
+    red: { label: 'Merah', color: '#ed1b24' },
+    yellow: { label: 'Kuning', color: '#fef200' },
+    green: { label: 'Hijau', color: '#1fb25a' },
+    darkblue: { label: 'Biru tua', color: '#1a237e' },
+    railroad: { label: 'Stasiun', color: '#111827' },
+    utility: { label: 'Utilitas', color: '#6b7280' }
+};
+const GROUP_ORDER = ['brown','lightblue','purple','orange','red','yellow','green','darkblue','railroad','utility'];
+
+function catalog() {
+    const S = (id, name, group, price, rents, houseCost) => ({
+        id, name, group, price, rentLevels: rents, houseCost, mortgage: Math.floor(price / 2),
+        ownerId: null, houses: 0, hotel: false, mortgaged: false
+    });
+    return [
+        S('med','Boulevard of Belleville','brown',60,[2,10,30,90,160,250],50),
+        S('bal','Street Lecourbe','brown',60,[4,20,60,180,320,450],50),
+        S('ori','Courcelles Streef','lightblue',100,[6,30,90,270,400,550],50),
+        S('ver','Courcelles Street','lightblue',100,[6,30,90,270,400,550],50),
+        S('con','Avenue of the Republic','lightblue',120,[8,40,100,300,450,600],50),
+        S('stc','Boulevard of the Villette','purple',140,[10,50,150,450,625,750],100),
+        S('sta','Avenue of Neuilly','purple',140,[10,50,150,450,625,750],100),
+        S('vir','Frue of Paradise','purple',160,[12,60,180,500,700,900],100),
+        S('stj','Mozart Avenue','orange',180,[14,70,200,550,750,950],100),
+        S('ten','Boulevard Saint-Michel','orange',180,[14,70,200,550,750,950],100),
+        S('ny','Place Pigalle','orange',200,[16,80,220,600,800,1000],100),
+        S('ken','Avenue Matignon','red',220,[18,90,250,700,875,1050],150),
+        S('ind','Boulevard Malesherbes','red',220,[18,90,250,700,875,1050],150),
+        S('ill','Avenue Henri-Martin','red',240,[20,100,300,750,925,1100],150),
+        S('atl','Suburb Saint-Honore','yellow',260,[22,110,330,800,975,1150],150),
+        S('ven','Place Purse','yellow',260,[22,110,330,800,975,1150],150),
+        S('mar','Street the Fayette','yellow',280,[24,120,360,850,1025,1200],150),
+        S('pac','Avenue of Breteuil','green',300,[26,130,390,900,1100,1275],200),
+        S('nc','Avenue Foch','green',300,[26,130,390,900,1100,1275],200),
+        S('pen','Boulevard of the Nasturtiums','green',320,[28,150,450,1000,1200,1400],200),
+        S('park','Avenue of the Champs-Elysees','darkblue',350,[35,175,500,1100,1300,1500],200),
+        S('board','Street of Peace','darkblue',400,[50,200,600,1400,1700,2000],200),
+        S('rr1','Park Montparnasse','railroad',200,[25,50,100,200],0),
+        S('rr2','Park of Lyon','railroad',200,[25,50,100,200],0),
+        S('rr3','Park North','railroad',200,[25,50,100,200],0),
+        S('rr4','Park Gare Saint-Lazare','railroad',200,[25,50,100,200],0),
+        S('el','Electric Works','utility',150,[],0),
+        S('wat','Water Works','utility',150,[],0)
+    ];
+}
+
+const state = {
+    players: [],
+    properties: catalog(),
+    transactions: [],
+    colorIndex: 0,
+    settings: { startingCash: 1500, goAmount: 200, incomeTax: 200, luxuryTax: 100 },
+    requests: [],
+    lastFx: null,
+    debtSettlement: null
+};
+
+let currentView = 'players';
+let pickPlayerId = null;
+let pickFromId = null;
+let pickToId = null;
+let pickExcludeId = null;
+let assetSearchQuery = '';
+let playerAssetSearchQuery = '';
+let viewAnimating = false;
+let modalSeq = 0;
+let modalClosing = false;
+let moneyFxCanClose = false;
+let appSession = null;
+let saveTimer = null;
+let suppressSave = false;
+let pollTimer = null;
+let audioCtx = null;
+let lastBankerSoundReqId = '';
+let lastRemoteJson = '';
+let roleGateOpen = false;
+let requestGateOpen = false;
+let shownRequestId = null;
+let lastDebtToastAt = 0;
+
+function isServerMode() {
+    return location.protocol === 'http:' || location.protocol === 'https:';
+}
+function isPlayer() { return !!(appSession && appSession.role === 'player'); }
+function isBanker() { return !isPlayer(); }
+function sessionPlayer() { return isPlayer() ? getPlayer(appSession.playerId) : null; }
+function playerCanRequest() {
+    const p = sessionPlayer();
+    return !!(p && !p.bankrupt);
+}
+function getWatchPlayerId() {
+    try { return localStorage.getItem(WATCH_KEY) || ''; } catch (e) { return ''; }
+}
+function setWatchPlayerId(id) {
+    try {
+        if (id) localStorage.setItem(WATCH_KEY, id);
+        else localStorage.removeItem(WATCH_KEY);
+    } catch (e) {}
+}
+function watchedPlayer() {
+    let p = getPlayer(getWatchPlayerId());
+    if (!p && state.players.length) {
+        p = state.players[0];
+        setWatchPlayerId(p.id);
+    }
+    return p || null;
+}
+function updateAddFab() {
+    const fab = document.getElementById('addPlayerFab');
+    if (!fab) return;
+    fab.classList.toggle('hidden', isPlayer() || currentView !== 'players');
+    document.body.classList.toggle('has-fab', !isPlayer() && currentView === 'players');
+}
+function readSession() {
+    try {
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (!raw) return null;
+        const s = JSON.parse(raw);
+        if (s && (s.role === 'banker' || s.role === 'player')) return s;
+    } catch (e) {}
+    return null;
+}
+function writeSession(s) {
+    appSession = s;
+    try {
+        if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+        else localStorage.removeItem(SESSION_KEY);
+    } catch (e) {}
+}
+function applyLoaded(data) {
+    if (!data || typeof data !== 'object') return;
+    if (Array.isArray(data.players)) state.players = data.players;
+    if (Array.isArray(data.properties) && data.properties.length === catalog().length) {
+        const fresh = catalog();
+        const byId = {};
+        data.properties.forEach(function (p) { byId[p.id] = p; });
+        state.properties = fresh.map(function (base) {
+            const old = byId[base.id];
+            if (!old) return base;
+            return Object.assign({}, base, {
+                ownerId: old.ownerId || null,
+                houses: old.houses || 0,
+                hotel: !!old.hotel,
+                mortgaged: !!old.mortgaged
+            });
+        });
+    }
+    if (Array.isArray(data.transactions)) state.transactions = data.transactions;
+    if (typeof data.colorIndex === 'number') state.colorIndex = data.colorIndex;
+    if (data.settings) Object.assign(state.settings, data.settings);
+    state.requests = Array.isArray(data.requests) ? data.requests : [];
+    state.lastFx = data.lastFx || null;
+    state.debtSettlement = data.debtSettlement || null;
+}
+function snapshotStateJson() {
+    return JSON.stringify(state);
+}
+function saveState() {
+    if (!Array.isArray(state.requests)) state.requests = [];
+    if (suppressSave) return;
+    if (!isServerMode()) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+        return;
+    }
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+        lastRemoteJson = snapshotStateJson();
+        fetch(SAVE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: lastRemoteJson
+        }).catch(function () {});
+    }, 280);
+}
+function loadStateFromLocal() {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        applyLoaded(JSON.parse(raw));
+    } catch (e) {}
+}
+async function loadStateFromServer() {
+    const r = await fetch(SAVE_URL, { cache: 'no-store' });
+    if (!r.ok) return false;
+    const data = await r.json();
+    if (data) {
+        applyLoaded(data);
+        lastRemoteJson = JSON.stringify(data);
+    }
+    return true;
+}
+
+function generateId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function formatMoney(n) { return '$' + Math.abs(Number(n) || 0).toLocaleString('id-ID'); }
+function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
+function getPlayer(id) { return state.players.find(p => p.id === id); }
+function getProp(id) { return state.properties.find(p => p.id === id); }
+function activePlayers() { return state.players.filter(p => !p.bankrupt); }
+function nextColor() { const c = PLAYER_COLORS[state.colorIndex % PLAYER_COLORS.length]; state.colorIndex++; return c; }
+
+function pushTx(partial) {
+    state.transactions.push(Object.assign({ id: generateId(), timestamp: Date.now() }, partial));
+    if (state.transactions.length > 200) state.transactions = state.transactions.slice(-200);
+}
+
+function showToast(message, type) {
+    const el = document.createElement('div');
+    el.className = 'toast ' + (type || '');
+    el.textContent = message;
+    document.getElementById('toastContainer').appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2200);
+}
+
+function groupProps(group) { return state.properties.filter(p => p.group === group); }
+
+function groupLetter(group) {
+    const i = GROUP_ORDER.indexOf(group);
+    return i < 0 ? '?' : String.fromCharCode(65 + i);
+}
+
+function propCode(p) {
+    const n = groupProps(p.group).findIndex(x => x.id === p.id) + 1;
+    return groupLetter(p.group) + n;
+}
+
+function propMatchesQuery(p, q) {
+    q = String(q || '').toLowerCase().trim();
+    if (!q) return true;
+    const code = propCode(p).toLowerCase();
+    const letter = groupLetter(p.group).toLowerCase();
+    if (q.length === 1) {
+        return letter === q || code.charAt(0) === q;
+    }
+    if (q.length === 2) {
+        return code === q || code.indexOf(q) === 0;
+    }
+    const owner = p.ownerId ? getPlayer(p.ownerId) : null;
+    const blob = [code, p.name, owner ? owner.name : 'bank', GROUP_META[p.group].label].join(' ').toLowerCase();
+    return blob.indexOf(q) !== -1;
+}
+
+function ownsFullSet(playerId, group) {
+    const list = groupProps(group);
+    if (!list.length) return false;
+    return list.every(p => p.ownerId === playerId && !p.mortgaged);
+}
+
+function houseStock() {
+    let houses = 0, hotels = 0;
+    state.properties.forEach(p => {
+        if (p.hotel) hotels += 1;
+        else houses += p.houses;
+    });
+    return { houses, hotels };
+}
+
+function calcStreetRent(prop) {
+    if (!prop.ownerId || prop.mortgaged) return 0;
+    if (prop.hotel) return prop.rentLevels[5];
+    if (prop.houses > 0) return prop.rentLevels[prop.houses];
+    const base = prop.rentLevels[0];
+    return ownsFullSet(prop.ownerId, prop.group) ? base * 2 : base;
+}
+
+function railroadCount(ownerId) {
+    return state.properties.filter(p => p.group === 'railroad' && p.ownerId === ownerId && !p.mortgaged).length;
+}
+
+function calcRailroadRent(prop) {
+    if (!prop.ownerId || prop.mortgaged) return 0;
+    const n = railroadCount(prop.ownerId);
+    return prop.rentLevels[Math.max(0, n - 1)] || 0;
+}
+
+function utilityCount(ownerId) {
+    return state.properties.filter(p => p.group === 'utility' && p.ownerId === ownerId && !p.mortgaged).length;
+}
+
+function calcUtilityRent(prop, dice) {
+    if (!prop.ownerId || prop.mortgaged) return 0;
+    const n = utilityCount(prop.ownerId);
+    return (n >= 2 ? 10 : 4) * dice;
+}
+
+function calcRent(prop, dice) {
+    if (prop.group === 'railroad') return calcRailroadRent(prop);
+    if (prop.group === 'utility') return calcUtilityRent(prop, dice || 7);
+    return calcStreetRent(prop);
+}
+
+function buildingsOnGroup(group) {
+    return groupProps(group).some(p => p.houses > 0 || p.hotel);
+}
+
+function evenBuildOk(prop, nextHouses, nextHotel) {
+    const others = groupProps(prop.group).map(p => {
+        if (p.id !== prop.id) return p.hotel ? 5 : p.houses;
+        return nextHotel ? 5 : nextHouses;
+    });
+    return Math.max.apply(null, others) - Math.min.apply(null, others) <= 1;
+}
+
+function soundMuted() {
+    try { return localStorage.getItem(SOUND_MUTE_KEY) === '1'; } catch (e) { return false; }
+}
+function setSoundMuted(on) {
+    try { localStorage.setItem(SOUND_MUTE_KEY, on ? '1' : '0'); } catch (e) {}
+}
+function getAudioCtx() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!audioCtx) audioCtx = new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+}
+function playTone(freq, duration, type, gainVal) {
+    const ctx = getAudioCtx();
+    if (!ctx || soundMuted()) return;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(gainVal || 0.12, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.connect(g);
+    g.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+}
+function playSadSound() {
+    playTone(392, 0.16, 'triangle', 0.14);
+    setTimeout(function () { playTone(294, 0.2, 'triangle', 0.14); }, 140);
+    setTimeout(function () { playTone(196, 0.38, 'sine', 0.16); }, 300);
+}
+function playHappySound() {
+    playTone(523, 0.12, 'sine', 0.12);
+    setTimeout(function () { playTone(659, 0.12, 'sine', 0.12); }, 110);
+    setTimeout(function () { playTone(784, 0.22, 'triangle', 0.14); }, 220);
+}
+function playNotifySound() {
+    playTone(880, 0.09, 'square', 0.08);
+    setTimeout(function () { playTone(1175, 0.18, 'sine', 0.12); }, 90);
+}
+function playMoneyRoleSounds(from, to, type) {
+    if (!isPlayer()) return;
+    const me = appSession && appSession.playerId;
+    if (!me) return;
+    if (type === 'buy' && from === me) {
+        playHappySound();
+        return;
+    }
+    if (from === me && to !== me) playSadSound();
+    else if (to === me && from !== me) playHappySound();
+}
+function textOnColor(hex) {
+    const h = String(hex || '#000000').replace('#', '');
+    if (h.length < 6) return '#fff';
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    const y = (r * 299 + g * 587 + b * 114) / 1000;
+    return y > 160 ? '#1a2e24' : '#fff';
+}
+function muteToggleHtml() {
+    return '<label class="flex items-center gap-2 text-sm font-bold" style="color:var(--ink)">' +
+        '<input type="checkbox" id="muteSound" ' + (soundMuted() ? 'checked' : '') + ' onchange="setSoundMuted(this.checked)">' +
+        ' Senyapkan suara</label>';
+}
+
+function reduceMotion() {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function applyView(name) {
+    currentView = name;
+    document.body.classList.toggle('on-board', name === 'board' || (isPlayer() && name === 'cash'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + name).classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.getAttribute('data-view') === name));
+    renderAll();
+}
+
+function showView(name) {
+    if (name === currentView || viewAnimating) return;
+    const oldEl = document.getElementById('view-' + currentView);
+    if (!oldEl || reduceMotion() || typeof gsap === 'undefined') {
+        applyView(name);
+        return;
+    }
+    viewAnimating = true;
+    gsap.to(oldEl, {
+        opacity: 0,
+        y: -10,
+        duration: 0.18,
+        ease: 'power1.in',
+        onComplete: function () {
+            gsap.set(oldEl, { clearProps: 'opacity,y,transform' });
+            applyView(name);
+            const neu = document.getElementById('view-' + name);
+            gsap.fromTo(neu, { opacity: 0, y: 16 }, {
+                opacity: 1,
+                y: 0,
+                duration: 0.22,
+                ease: 'power2.out',
+                onComplete: function () {
+                    gsap.set(neu, { clearProps: 'opacity,y,transform' });
+                    viewAnimating = false;
+                }
+            });
+        }
+    });
+}
+
+function closeModal() {
+    const box = document.getElementById('modalContainer');
+    const overlay = box.querySelector('.modal-overlay');
+    const content = box.querySelector('.modal-content');
+    if (!overlay) {
+        pickPlayerId = pickFromId = pickToId = pickExcludeId = null;
+        return;
+    }
+    if (modalClosing) return;
+    modalClosing = true;
+    const seq = modalSeq;
+    const finish = function () {
+        if (seq !== modalSeq) {
+            modalClosing = false;
+            return;
+        }
+        box.innerHTML = '';
+        pickPlayerId = pickFromId = pickToId = pickExcludeId = null;
+        modalClosing = false;
+    };
+    if (reduceMotion() || typeof gsap === 'undefined') {
+        finish();
+        return;
+    }
+    gsap.to(overlay, { opacity: 0, duration: 0.2, ease: 'power1.in' });
+    gsap.to(content, { y: 40, opacity: 0, duration: 0.2, ease: 'power2.in', onComplete: finish });
+}
+
+function openModal(html) {
+    modalSeq++;
+    modalClosing = false;
+    const box = document.getElementById('modalContainer');
+    const overlayOld = box.querySelector('.modal-overlay');
+    if (overlayOld && typeof gsap !== 'undefined') {
+        gsap.killTweensOf(overlayOld);
+        const c = box.querySelector('.modal-content');
+        if (c) gsap.killTweensOf(c);
+    }
+    box.innerHTML =
+        '<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal-content">' +
+        '<div class="modal-handle"></div>' +
+        '<button type="button" onclick="closeModal()" class="modal-close" aria-label="Tutup"><i class="fa-solid fa-xmark text-lg"></i></button>' +
+        html + '</div></div>';
+    const overlay = box.querySelector('.modal-overlay');
+    const content = box.querySelector('.modal-content');
+    if (reduceMotion() || typeof gsap === 'undefined') return;
+    gsap.set(overlay, { opacity: 0 });
+    gsap.set(content, { y: 40, opacity: 0 });
+    gsap.to(overlay, { opacity: 1, duration: 0.22, ease: 'power1.out' });
+    gsap.to(content, { y: 0, opacity: 1, duration: 0.28, ease: 'power2.out' });
+}
+
+function snapshotBalances() {
+    const m = {};
+    state.players.forEach(p => { m[p.id] = p.balance; });
+    return m;
+}
+
+function signedMoney(n) {
+    return (n < 0 ? '-' : '') + formatMoney(n);
+}
+
+function canAfford(player, amount) {
+    if (!player) { showToast('Pilih pemain', 'error'); return false; }
+    if (amount > player.balance) {
+        showToast('Saldo tidak cukup (' + signedMoney(player.balance) + ')', 'error');
+        return false;
+    }
+    return true;
+}
+
+function playerLiquidity(playerId) {
+    const pl = getPlayer(playerId);
+    if (!pl) return 0;
+    let n = Number(pl.balance) || 0;
+    state.properties.forEach(function (pr) {
+        if (pr.ownerId !== playerId) return;
+        const refund = Math.floor((pr.houseCost || 0) / 2);
+        if (pr.hotel) n += refund * 5;
+        else if (pr.houses > 0) n += refund * pr.houses;
+        if (!pr.mortgaged) n += pr.mortgage || 0;
+    });
+    return n;
+}
+function canRaiseForDebt(playerId) {
+    return state.properties.some(function (pr) {
+        if (pr.ownerId !== playerId) return false;
+        if (pr.hotel) return evenBuildOk(pr, 4, false);
+        if (pr.houses > 0) return evenBuildOk(pr, pr.houses - 1, false);
+        return !pr.mortgaged && !buildingsOnGroup(pr.group);
+    });
+}
+function releasePlayerAssetsToBank(playerId) {
+    state.properties.forEach(function (pr) {
+        if (pr.ownerId !== playerId) return;
+        pr.ownerId = null;
+        pr.houses = 0;
+        pr.hotel = false;
+        pr.mortgaged = false;
+    });
+}
+function debtKind(d) {
+    return (d && d.kind) || 'rent';
+}
+function beginDebtMortgage(payload) {
+    state.debtSettlement = Object.assign({
+        status: 'choosing_mortgage',
+        startedAt: Date.now()
+    }, payload);
+    showToast('Pembayar wajib hipotek dulu', 'success');
+    closeModal();
+    renderAll();
+}
+function applyRentDue(payer, owner, amount, propertyId) {
+    if (!payer || !owner || amount <= 0) { showToast('Tidak bisa sewa', 'error'); return false; }
+    if (payer.bankrupt) { showToast('Pemain bangkrut', 'error'); return false; }
+    if (state.debtSettlement) { showToast('Selesaikan hipotek wajib dulu', 'error'); return false; }
+    if (payer.balance >= amount) {
+        settleRentPayment(payer.id, owner.id, amount, propertyId);
+        return true;
+    }
+    if (playerLiquidity(payer.id) >= amount) {
+        beginDebtMortgage({
+            kind: 'rent',
+            payerId: payer.id,
+            ownerId: owner.id,
+            amount: amount,
+            propertyId: propertyId
+        });
+        return true;
+    }
+    settleRentBankruptcy(payer.id, owner.id, amount, propertyId);
+    return true;
+}
+function applyPayBankDue(payer, amount, reason) {
+    if (!payer || amount <= 0) { showToast('Data bayar tidak valid', 'error'); return false; }
+    if (payer.bankrupt) { showToast('Pemain bangkrut', 'error'); return false; }
+    if (state.debtSettlement) { showToast('Selesaikan hipotek wajib dulu', 'error'); return false; }
+    const note = reason || 'Bayar bank';
+    if (payer.balance >= amount) {
+        settlePayBankPayment(payer.id, amount, note);
+        return true;
+    }
+    if (playerLiquidity(payer.id) >= amount) {
+        beginDebtMortgage({
+            kind: 'pay_bank',
+            payerId: payer.id,
+            ownerId: 'bank',
+            amount: amount,
+            propertyId: null,
+            reason: note
+        });
+        return true;
+    }
+    settlePayBankBankruptcy(payer.id, amount, note);
+    return true;
+}
+function settleRentPayment(payerId, ownerId, amount, propertyId) {
+    const payer = getPlayer(payerId);
+    const owner = getPlayer(ownerId);
+    if (!payer || !owner) return;
+    const old = snapshotBalances();
+    payer.balance -= amount;
+    owner.balance += amount;
+    state.debtSettlement = null;
+    hideDebtOverlay();
+    const p = getProp(propertyId);
+    pushTx({ type: 'rent', from: payerId, to: ownerId, propertyId: propertyId, amount: amount, reason: 'Sewa ' + (p ? p.name : '') });
+    finishMoney(payerId, ownerId, old, 'Sewa ' + formatMoney(amount), amount);
+}
+function settlePayBankPayment(payerId, amount, reason) {
+    const payer = getPlayer(payerId);
+    if (!payer) return;
+    const old = snapshotBalances();
+    payer.balance -= amount;
+    state.debtSettlement = null;
+    hideDebtOverlay();
+    pushTx({ type: 'pay-bank', from: payerId, to: 'bank', amount: amount, reason: reason || 'Bayar bank' });
+    finishMoney(payerId, 'bank', old, payer.name + ' bayar ' + formatMoney(amount), amount);
+}
+function settleRentBankruptcy(payerId, ownerId, amount, propertyId) {
+    const payer = getPlayer(payerId);
+    const owner = getPlayer(ownerId);
+    if (!payer || !owner) return;
+    const old = snapshotBalances();
+    const paid = Math.min(Number(payer.balance) || 0, amount);
+    payer.balance -= paid;
+    owner.balance += paid;
+    payer.bankrupt = true;
+    payer.balance = 0;
+    releasePlayerAssetsToBank(payerId);
+    state.debtSettlement = null;
+    hideDebtOverlay();
+    const p = getProp(propertyId);
+    if (paid > 0) {
+        pushTx({ type: 'rent', from: payerId, to: ownerId, propertyId: propertyId, amount: paid, reason: 'Sewa sisa (bangkrut) ' + (p ? p.name : '') });
+    }
+    pushTx({ type: 'bangkrut', from: payerId, to: 'bank', amount: 0, propertyId: propertyId, reason: 'Bangkrut sewa' });
+    finishMoney(payerId, ownerId, old, payer.name + ' bangkrut', paid);
+}
+function settlePayBankBankruptcy(payerId, amount, reason) {
+    const payer = getPlayer(payerId);
+    if (!payer) return;
+    const old = snapshotBalances();
+    const paid = Math.min(Number(payer.balance) || 0, amount);
+    payer.balance -= paid;
+    payer.bankrupt = true;
+    payer.balance = 0;
+    releasePlayerAssetsToBank(payerId);
+    state.debtSettlement = null;
+    hideDebtOverlay();
+    if (paid > 0) {
+        pushTx({ type: 'pay-bank', from: payerId, to: 'bank', amount: paid, reason: (reason || 'Bayar bank') + ' (bangkrut)' });
+    }
+    pushTx({ type: 'bangkrut', from: payerId, to: 'bank', amount: 0, reason: 'Bangkrut bayar bank' });
+    finishMoney(payerId, 'bank', old, payer.name + ' bangkrut', paid);
+}
+function completeDebtFromState(d) {
+    if (debtKind(d) === 'pay_bank') {
+        settlePayBankPayment(d.payerId, d.amount, d.reason);
+        return;
+    }
+    settleRentPayment(d.payerId, d.ownerId, d.amount, d.propertyId);
+}
+function bankruptDebtFromState(d) {
+    if (debtKind(d) === 'pay_bank') {
+        settlePayBankBankruptcy(d.payerId, d.amount, d.reason);
+        return;
+    }
+    settleRentBankruptcy(d.payerId, d.ownerId, d.amount, d.propertyId);
+}
+function debtPayerOk(d) {
+    const payer = getPlayer(d.payerId);
+    if (!payer) return false;
+    if (debtKind(d) === 'pay_bank') return true;
+    return !!getPlayer(d.ownerId);
+}
+function tryCompleteDebtSettlement() {
+    const d = state.debtSettlement;
+    if (!d) { hideDebtOverlay(); return; }
+    const payer = getPlayer(d.payerId);
+    if (!payer || !debtPayerOk(d)) {
+        state.debtSettlement = null;
+        hideDebtOverlay();
+        return;
+    }
+    if (payer.balance >= d.amount) {
+        completeDebtFromState(d);
+        return;
+    }
+    if (!canRaiseForDebt(payer.id)) {
+        bankruptDebtFromState(d);
+        return;
+    }
+    maybeShowDebtOverlay();
+}
+function hideDebtOverlay() {
+    const box = document.getElementById('debtOverlay');
+    if (!box) return;
+    box.classList.add('hidden');
+    box.innerHTML = '';
+}
+function maybeToastDebtForOwner() {
+    const d = state.debtSettlement;
+    if (!d || debtKind(d) === 'pay_bank') return;
+    if (!isPlayer() || !appSession || appSession.playerId !== d.ownerId) return;
+    if (d.startedAt === lastDebtToastAt) return;
+    lastDebtToastAt = d.startedAt;
+    const payer = getPlayer(d.payerId);
+    showToast('Menunggu hipotek wajib dari ' + (payer ? payer.name : 'pembayar'), 'success');
+}
+function debtDueSub(d, owner) {
+    if (debtKind(d) === 'pay_bank') {
+        return 'Bayar ke bank' + (d.reason ? ' · ' + d.reason : '');
+    }
+    return 'Sewa ke ' + (owner ? owner.name : '?');
+}
+function debtSellRefund(pr) {
+    return Math.floor((pr.houseCost || 0) / 2);
+}
+function debtBuildLabel(pr) {
+    if (pr.hotel) return 'Hotel';
+    if (pr.houses > 0) return pr.houses + ' rumah';
+    if (pr.mortgaged) return 'Sudah hipotek';
+    return 'Tanah kosong';
+}
+function debtAssetRank(pr) {
+    if (pr.hotel || pr.houses > 0) return 0;
+    if (!pr.mortgaged && !buildingsOnGroup(pr.group)) return 1;
+    if (!pr.mortgaged) return 2;
+    return 3;
+}
+function debtHeaderHtml(sub) {
+    return '<div class="debt-head"><div class="req-icon"><i class="fa-solid fa-file-invoice-dollar"></i></div>' +
+        '<div><p class="text-[10px] font-extrabold uppercase tracking-wider opacity-80">Wajib</p>' +
+        '<p class="text-base font-extrabold leading-tight">Hipotek wajib</p>' +
+        '<p class="text-[11px] font-bold opacity-90">' + escapeHtml(sub) + '</p></div></div>';
+}
+function debtMeterHtml(payer, amount) {
+    const bal = Number(payer.balance) || 0;
+    const need = Math.max(0, amount - bal);
+    const pct = amount > 0 ? Math.min(100, Math.round((bal / amount) * 100)) : 100;
+    return '<div class="debt-stats">' +
+        '<div class="debt-stat"><span>Tagihan</span><b>' + formatMoney(amount) + '</b></div>' +
+        '<div class="debt-stat"><span>Saldo</span><b>' + formatMoney(bal) + '</b></div>' +
+        '<div class="debt-stat debt-stat-need"><span>Kurang</span><b>' + formatMoney(need) + '</b></div></div>' +
+        '<div class="debt-meter" aria-hidden="true"><i style="width:' + pct + '%"></i></div>';
+}
+function debtAssetCardHtml(pr) {
+    const meta = GROUP_META[pr.group] || { color: '#1a2e24', label: pr.group };
+    const refund = debtSellRefund(pr);
+    let action = '';
+    if (pr.hotel || pr.houses > 0) {
+        const label = pr.hotel ? 'Jual +' + formatMoney(refund) : 'Jual +' + formatMoney(refund);
+        action = '<button type="button" class="debt-cta debt-cta-in" onclick="debtSellHouse(\'' + pr.id + '\')">' + escapeHtml(label) + '</button>';
+    } else if (!pr.mortgaged && !buildingsOnGroup(pr.group)) {
+        action = '<button type="button" class="debt-cta debt-cta-in" onclick="debtMortgage(\'' + pr.id + '\')">Hipotek +' + formatMoney(pr.mortgage) + '</button>';
+    } else {
+        action = '<span class="debt-cta debt-cta-lock">Set ' + escapeHtml(meta.label) + '</span>';
+    }
+    return '<div class="debt-row"><div class="debt-row-strip" style="background:' + meta.color + '"></div>' +
+        '<div class="debt-row-main"><p class="debt-row-name"><span class="code-badge" style="' + badgeStyle(pr.group) + '">' +
+        escapeHtml(propCode(pr)) + '</span> ' + escapeHtml(pr.name) + '</p>' +
+        '<p class="debt-row-meta">' + escapeHtml(debtBuildLabel(pr)) + '</p></div>' + action + '</div>';
+}
+function debtPayerHtml(d, payer, owner) {
+    const owned = state.properties.filter(function (pr) { return pr.ownerId === payer.id; });
+    const mortgagedN = owned.filter(function (pr) { return pr.mortgaged && !pr.hotel && !pr.houses; }).length;
+    const active = owned.filter(function (pr) { return !(pr.mortgaged && !pr.hotel && !pr.houses); })
+        .sort(function (a, b) { return debtAssetRank(a) - debtAssetRank(b); });
+    const dense = active.length > 6 ? ' debt-list-dense' : '';
+    const rows = active.map(debtAssetCardHtml).join('');
+    const mortLine = mortgagedN ? '<p class="debt-mort-sum">Sudah hipotek · ' + mortgagedN + ' tanah</p>' : '';
+    return '<div class="role-card">' + debtHeaderHtml(debtDueSub(d, owner)) +
+        debtMeterHtml(payer, d.amount) +
+        (rows ? '<div class="debt-list' + dense + '">' + rows + '</div>' : '<p class="debt-mort-sum">Tidak ada aset aktif</p>') +
+        mortLine + '</div>';
+}
+function debtWaitCardHtml(d, payer, owner, note) {
+    return '<div class="role-card">' + debtHeaderHtml(debtDueSub(d, owner)) +
+        debtMeterHtml(payer, d.amount) +
+        '<p class="text-sm font-bold" style="color:var(--muted)">' + note + '</p></div>';
+}
+function maybeShowDebtOverlay() {
+    const d = state.debtSettlement;
+    const box = document.getElementById('debtOverlay');
+    if (!box) return;
+    if (!d) { hideDebtOverlay(); return; }
+    const payer = getPlayer(d.payerId);
+    const owner = d.ownerId === 'bank' ? null : getPlayer(d.ownerId);
+    if (!payer || !debtPayerOk(d)) { hideDebtOverlay(); return; }
+    if (payer.balance < d.amount && !canRaiseForDebt(payer.id)) {
+        bankruptDebtFromState(d);
+        return;
+    }
+    hideRequestOverlay();
+    box.classList.remove('hidden');
+    const me = isPlayer() ? (appSession && appSession.playerId) : null;
+    if (me === d.payerId) {
+        box.innerHTML = debtPayerHtml(d, payer, owner);
+    } else if (isBanker()) {
+        box.innerHTML = debtWaitCardHtml(d, payer, owner, 'Menunggu — ' + escapeHtml(payer.name));
+    } else {
+        const waitLine = debtKind(d) === 'pay_bank'
+            ? escapeHtml(payer.name) + ' sedang hipotek untuk bayar ke bank'
+            : escapeHtml(payer.name) + ' sedang hipotek untuk sewa ke ' + escapeHtml(owner ? owner.name : '?');
+        box.innerHTML = debtWaitCardHtml(d, payer, owner, waitLine);
+    }
+    maybeToastDebtForOwner();
+}
+function debtSellHouse(propId) { sellHouse(propId); }
+function debtMortgage(propId) { mortgageProp(propId); }
+
+function amountFieldHtml(id, value) {
+    const val = value === undefined || value === '' ? '' : value;
+    return '<div class="amt-wrap mb-3"><input id="' + id + '" class="input-field" type="number" value="' + val + '" placeholder="Jumlah" inputmode="numeric">' +
+        '<button type="button" class="amt-max" onclick="fillMaxAmount(\'' + id + '\')">Max</button></div>';
+}
+
+function fillMaxAmount(inputId) {
+    const pid = inputId === 'trAmt' ? pickFromId : pickPlayerId;
+    const p = getPlayer(pid);
+    if (!p) { showToast('Pilih pemain dulu', 'error'); return; }
+    const el = document.getElementById(inputId);
+    if (el) el.value = Math.max(0, p.balance);
+}
+
+function badgeStyle(group) {
+    const meta = GROUP_META[group] || { color: '#1a2e24' };
+    const darkText = group === 'yellow' || group === 'lightblue';
+    return 'background:' + meta.color + ';color:' + (darkText ? '#1a2e24' : '#fff');
+}
+
+function fxPartyHtml(id, oldBalances, role) {
+    const oldMap = oldBalances || {};
+    const isFrom = role === 'from';
+    const wrapId = isFrom ? 'fxFrom' : 'fxTo';
+    const cardCls = 'fx-card ' + (isFrom ? 'fx-from' : 'fx-to');
+    const roleLabel = isFrom ? 'PENGIRIM' : 'PENERIMA';
+    if (id === 'bank') {
+        return '<div class="fx-party" id="' + wrapId + '"><div class="' + cardCls + '">' +
+            '<div class="fx-strip"></div><div class="fx-card-body">' +
+            '<span class="fx-role">' + roleLabel + '</span>' +
+            '<div class="fx-card-row"><div class="fx-avatar bank"><i class="fa-solid fa-landmark"></i></div>' +
+            '<div class="fx-meta"><div class="fx-name">Bank</div></div></div></div></div></div>';
+    }
+    const p = getPlayer(id);
+    if (!p) return '<div class="fx-party" id="' + wrapId + '"><div class="fx-name">?</div></div>';
+    const old = oldMap[p.id] !== undefined ? oldMap[p.id] : p.balance;
+    const cls = isFrom ? 'fx-bal fx-bal-from fx-down' : 'fx-bal fx-bal-to fx-up';
+    return '<div class="fx-party" id="' + wrapId + '"><div class="' + cardCls + '">' +
+        '<div class="fx-strip"></div><div class="fx-card-body">' +
+        '<span class="fx-role">' + roleLabel + '</span>' +
+        '<div class="fx-card-row"><div class="fx-avatar" style="background:' + p.color + '">' + escapeHtml(p.name.charAt(0).toUpperCase()) + '</div>' +
+        '<div class="fx-meta"><div class="fx-name">' + escapeHtml(p.name) + '</div>' +
+        '<div class="' + cls + '">' + signedMoney(old) + '</div></div></div></div></div></div>';
+}
+
+function fxPoint(sel) {
+    const el = document.querySelector(sel);
+    if (!el) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+
+function gotoPlayersThen(fn) {
+    viewAnimating = false;
+    if (typeof gsap !== 'undefined') {
+        document.querySelectorAll('.view').forEach(function (v) {
+            gsap.killTweensOf(v);
+            gsap.set(v, { clearProps: 'opacity,y,transform' });
+        });
+    }
+    renderAll();
+    requestAnimationFrame(function () { requestAnimationFrame(fn); });
+}
+
+function enableMoneyFxClose() {
+    moneyFxCanClose = true;
+    const layer = document.getElementById('moneyFxLayer');
+    const hint = document.getElementById('fxHint');
+    if (layer) layer.classList.add('ready');
+    if (hint) {
+        hint.textContent = 'Ketuk untuk menutup';
+        hint.style.opacity = '1';
+    }
+}
+
+function closeMoneyFx() {
+    if (!moneyFxCanClose) return;
+    moneyFxCanClose = false;
+    const layer = document.getElementById('moneyFxLayer');
+    if (typeof gsap !== 'undefined' && layer) {
+        gsap.killTweensOf(layer.querySelectorAll('.fx-bill'));
+        layer.querySelectorAll('.fx-bill').forEach(function (b) { b.remove(); });
+    }
+    if (layer) {
+        layer.classList.remove('open', 'ready');
+        layer.innerHTML = '';
+        layer.onclick = null;
+    }
+    tryCompleteDebtSettlement();
+    maybeShowBankerRequestPopup();
+}
+
+function flyBillsInModal() {
+    const start = fxPoint('#fxFrom .fx-avatar, #fxFrom');
+    const end = fxPoint('#fxTo .fx-avatar, #fxTo');
+    const n = 8;
+    for (let i = 0; i < n; i++) {
+        const bill = document.createElement('i');
+        bill.className = 'fa-solid fa-money-bill-wave fx-bill';
+        document.getElementById('moneyFxLayer').appendChild(bill);
+        gsap.fromTo(bill, {
+            x: start.x - 14 + (Math.random() * 24 - 12),
+            y: start.y - 10,
+            opacity: 0,
+            scale: 0.55,
+            rotation: Math.random() * 40 - 20
+        }, {
+            x: end.x - 14 + (Math.random() * 28 - 14),
+            y: end.y - 10,
+            opacity: 1,
+            scale: 1.05,
+            rotation: Math.random() * 50 - 20,
+            duration: 0.85,
+            delay: i * 0.06,
+            ease: 'power2.inOut',
+            onComplete: function () {
+                gsap.to(bill, { opacity: 0, scale: 0.4, duration: 0.2, onComplete: function () { bill.remove(); } });
+            }
+        });
+    }
+}
+
+function tweenBalanceEl(el, fromVal, toVal, skipMotion) {
+    if (!el || fromVal === toVal) return;
+    el.textContent = signedMoney(fromVal);
+    if (skipMotion) {
+        el.textContent = signedMoney(toVal);
+        return;
+    }
+    const obj = { n: fromVal };
+    gsap.to(obj, {
+        n: toVal,
+        duration: 0.9,
+        ease: 'power1.out',
+        onUpdate: function () { el.textContent = signedMoney(Math.round(obj.n)); },
+        onComplete: function () { el.textContent = signedMoney(toVal); }
+    });
+}
+
+function partyName(id) {
+    if (id === 'bank') return 'Bank';
+    const p = getPlayer(id);
+    return p ? p.name : '?';
+}
+function fxPropCardHtml(propertyId) {
+    const p = getProp(propertyId);
+    if (!p) return '';
+    const meta = GROUP_META[p.group] || { color: '#1a2e24' };
+    return '<div class="fx-prop-card"><div class="prop-strip" style="background:' + meta.color + '"></div>' +
+        '<div class="p-3"><span class="code-badge" style="background:' + meta.color + ';color:#fff">' + escapeHtml(propCode(p)) + '</span>' +
+        '<p class="fx-prop-name">' + escapeHtml(p.name) + '</p></div></div>';
+}
+function fxHeadline(fx) {
+    const type = fx.type || '';
+    const from = fx.from;
+    const to = fx.to;
+    const me = isPlayer() ? (appSession && appSession.playerId) : null;
+    const prop = fx.propertyId ? getProp(fx.propertyId) : null;
+    const propName = prop ? prop.name : '';
+    const fromN = partyName(from);
+    const toN = partyName(to);
+    const reason = fx.reason || '';
+    if (me) {
+        const iPay = from === me;
+        const iGet = to === me;
+        if (type === 'rent') {
+            if (iPay) return { title: 'Kamu membayar sewa', sub: propName };
+            if (iGet) return { title: 'Kamu menerima sewa', sub: propName };
+        }
+        if (type === 'buy' && iPay) return { title: 'Kamu membeli properti', sub: propName };
+        if (type === 'go' && iGet) return { title: 'Kamu menerima gaji GO', sub: '' };
+        if (type === 'recv-bank' && iGet) return { title: 'Kamu menerima dari bank', sub: reason };
+        if (type === 'pay-bank' && iPay) return { title: 'Kamu membayar ke bank', sub: reason };
+        if (type === 'p2p') {
+            if (iPay) return { title: 'Kamu transfer ke ' + toN, sub: reason };
+            if (iGet) return { title: 'Kamu menerima dari ' + fromN, sub: reason };
+        }
+        if (type === 'house' && iPay) return { title: 'Kamu membangun rumah', sub: propName };
+        if (type === 'hotel' && iPay) return { title: 'Kamu membangun hotel', sub: propName };
+        if (type === 'mortgage' && iGet) return { title: 'Kamu hipotek aset', sub: propName };
+        if (type === 'unmortgage' && iPay) return { title: 'Kamu tebus hipotek', sub: propName };
+        if (type === 'sell-build' && iGet) return { title: 'Kamu menjual bangunan', sub: propName };
+        if (type === 'bangkrut' && iPay) return { title: 'Kamu bangkrut', sub: 'Aset kembali ke bank' };
+        if (iPay) return { title: 'Kamu membayar', sub: reason || propName };
+        if (iGet) return { title: 'Kamu menerima', sub: reason || propName };
+    }
+    if (type === 'rent') return { title: fromN + ' membayar sewa ke ' + toN, sub: propName };
+    if (type === 'buy') return { title: fromN + ' membeli properti', sub: propName };
+    if (type === 'go') return { title: toN + ' menerima gaji GO', sub: '' };
+    if (type === 'pay-bank') return { title: fromN + ' membayar ke bank', sub: reason };
+    if (type === 'recv-bank') return { title: toN + ' menerima dari bank', sub: reason };
+    if (type === 'p2p') return { title: fromN + ' transfer ke ' + toN, sub: reason };
+    if (type === 'house') return { title: fromN + ' membangun rumah', sub: propName };
+    if (type === 'hotel') return { title: fromN + ' membangun hotel', sub: propName };
+    if (type === 'mortgage') return { title: toN + ' hipotek aset', sub: propName };
+    if (type === 'unmortgage') return { title: fromN + ' tebus hipotek', sub: propName };
+    if (type === 'sell-build') return { title: toN + ' menjual bangunan', sub: propName };
+    if (type === 'bangkrut') return { title: fromN + ' bangkrut', sub: 'Aset kembali ke bank' };
+    return { title: fromN + ' → ' + toN, sub: reason };
+}
+function fxAmountMood(fx) {
+    const me = isPlayer() ? (appSession && appSession.playerId) : null;
+    if (!me) return 'neutral';
+    if (fx.type === 'buy' && fx.from === me) return 'buy';
+    if (fx.from === me && fx.to !== me) return 'down';
+    if (fx.to === me && fx.from !== me) return 'up';
+    return 'neutral';
+}
+
+function playMoneyAnimation(opts) {
+    const from = opts.from;
+    const to = opts.to;
+    const amount = opts.amount || 0;
+    const oldBalances = opts.oldBalances || {};
+    const type = opts.type || '';
+    const ctx = fxHeadline(opts);
+    const mood = fxAmountMood(opts);
+    const moodClass = mood === 'down' ? ' down' : (mood === 'up' ? ' up' : (mood === 'buy' ? ' buy' : ''));
+    const arrow = mood === 'down' ? '<i class="fa-solid fa-arrow-down"></i>' : (mood === 'up' || mood === 'buy' ? '<i class="fa-solid fa-arrow-up"></i>' : '');
+    const propCard = opts.propertyId ? fxPropCardHtml(opts.propertyId) : '';
+    moneyFxCanClose = false;
+    gotoPlayersThen(function () {
+        const layer = document.getElementById('moneyFxLayer');
+        const skipMotion = reduceMotion() || typeof gsap === 'undefined';
+        layer.classList.remove('ready');
+        layer.classList.add('open');
+        layer.innerHTML = '<div class="fx-screen">' +
+            fxPartyHtml(from, oldBalances, 'from') +
+            '<div class="fx-mid">' +
+            '<p class="fx-ctx">' + escapeHtml(ctx.title) + '</p>' +
+            (ctx.sub ? '<p class="fx-ctx-sub">' + escapeHtml(ctx.sub) + '</p>' : '') +
+            propCard +
+            '<div class="fx-amount' + moodClass + '">' + arrow + formatMoney(amount) + '</div>' +
+            '<div class="fx-hint" id="fxHint"></div></div>' +
+            fxPartyHtml(to, oldBalances, 'to') +
+            '</div>';
+        layer.onclick = function () { closeMoneyFx(); };
+
+        const fromP = from === 'bank' ? null : getPlayer(from);
+        const toP = to === 'bank' ? null : getPlayer(to);
+        const fromEl = layer.querySelector('.fx-bal-from');
+        const toEl = layer.querySelector('.fx-bal-to');
+        if (fromP && fromEl) tweenBalanceEl(fromEl, oldBalances[fromP.id], fromP.balance, skipMotion);
+        if (toP && toEl) tweenBalanceEl(toEl, oldBalances[toP.id], toP.balance, skipMotion);
+
+        if (!skipMotion) flyBillsInModal();
+        playMoneyRoleSounds(from, to, type);
+        const wait = skipMotion ? 80 : 1100;
+        setTimeout(enableMoneyFxClose, wait);
+    });
+}
+
+function finishMoney(from, to, oldBalances, toastMsg, amount) {
+    closeModal();
+    const last = (state.transactions && state.transactions.length) ? state.transactions[state.transactions.length - 1] : {};
+    const fx = {
+        id: generateId(),
+        from: from,
+        to: to,
+        amount: amount,
+        oldBalances: oldBalances || {},
+        at: Date.now(),
+        type: last.type || '',
+        reason: last.reason || toastMsg || '',
+        propertyId: last.propertyId || null
+    };
+    state.lastFx = fx;
+    markFxSeen(fx.id);
+    playMoneyAnimation(fx);
+}
+function seenFxId() {
+    try { return localStorage.getItem(FX_SEEN_KEY) || ''; } catch (e) { return ''; }
+}
+function markFxSeen(id) {
+    try { if (id) localStorage.setItem(FX_SEEN_KEY, id); } catch (e) {}
+}
+function maybePlayRemoteFx() {
+    if (!isPlayer() || moneyFxCanClose) return;
+    const fx = state.lastFx;
+    if (!fx || !fx.id || seenFxId() === fx.id) return;
+    const me = appSession && appSession.playerId;
+    if (!me || (fx.from !== me && fx.to !== me)) return;
+    markFxSeen(fx.id);
+    playMoneyAnimation(fx);
+}
+
+function btnHtml(cls, icon, label, onclick) {
+    return '<button type="button" class="btn ' + cls + '" onclick="' + onclick + '"><i class="fa-solid ' + icon + '"></i> ' + label + '</button>';
+}
+
+function playerGridHtml(selectedId, onClickName, excludeId) {
+    return activePlayers().filter(function (p) { return p.id !== excludeId; }).map(p => {
+        const sel = selectedId === p.id ? ' selected' : '';
+        return '<div class="player-option' + sel + '" onclick="' + onClickName + '(\'' + p.id + '\')">' +
+            '<div class="p-avatar" style="background:' + p.color + '">' + escapeHtml(p.name.charAt(0).toUpperCase()) + '</div>' +
+            '<div class="pname">' + escapeHtml(p.name) + '</div>' +
+            '<div class="text-[10px] font-bold">' + formatMoney(p.balance) + '</div></div>';
+    }).join('');
+}
+
+function renderAll() {
+    applyChrome();
+    if (isPlayer()) {
+        renderPlayerHome();
+        renderPlayerAssets();
+        renderBoardView();
+        renderPlayerQueue();
+        renderPlayerSettings();
+    } else {
+        renderPlayersView();
+        renderBoardView();
+        renderCashView();
+        renderSettingsView();
+    }
+    saveState();
+    maybeShowDebtOverlay();
+    maybeShowBankerRequestPopup();
+}
+
+function applyChrome() {
+    const sub = document.getElementById('brandSub');
+    const nav = document.getElementById('appNav');
+    renderPlayerHeader();
+    if (isPlayer()) {
+        if (sub) sub.innerHTML = '<span class="player-chip">PEMAIN</span>';
+        nav.innerHTML =
+            '<button type="button" class="nav-item" data-view="players" onclick="showView(\'players\')"><span class="nav-icon"><i class="fa-solid fa-house"></i></span><span class="nav-label">Beranda</span></button>' +
+            '<button type="button" class="nav-item" data-view="cash" onclick="showView(\'cash\')"><span class="nav-icon"><i class="fa-solid fa-file-lines"></i></span><span class="nav-label">Aset</span></button>' +
+            '<button type="button" class="nav-item" data-view="board" onclick="showView(\'board\')"><span class="nav-icon"><i class="fa-solid fa-building"></i></span><span class="nav-label">Papan</span></button>' +
+            '<button type="button" class="nav-item" data-view="queue" onclick="showView(\'queue\')"><span class="nav-icon"><i class="fa-solid fa-inbox"></i></span><span class="nav-label">Antrian</span></button>' +
+            '<button type="button" class="nav-item" data-view="settings" onclick="showView(\'settings\')"><span class="nav-icon"><i class="fa-solid fa-gear"></i></span><span class="nav-label">Setelan</span></button>';
+    } else {
+        if (sub) sub.textContent = 'by EnricoNQB';
+        nav.innerHTML =
+            '<button type="button" class="nav-item" data-view="players" onclick="showView(\'players\')"><span class="nav-icon"><i class="fa-solid fa-users"></i></span><span class="nav-label">Pemain</span></button>' +
+            '<button type="button" class="nav-item" data-view="board" onclick="showView(\'board\')"><span class="nav-icon"><i class="fa-solid fa-building"></i></span><span class="nav-label">Aset</span></button>' +
+            '<button type="button" class="nav-item" data-view="cash" onclick="showView(\'cash\')"><span class="nav-icon"><i class="fa-solid fa-money-bill-transfer"></i></span><span class="nav-label">Kas</span></button>' +
+            '<button type="button" class="nav-item" data-view="settings" onclick="showView(\'settings\')"><span class="nav-icon"><i class="fa-solid fa-gear"></i></span><span class="nav-label">Setelan</span></button>';
+        if (currentView === 'queue') currentView = 'cash';
+    }
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.getAttribute('data-view') === currentView));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + currentView));
+    updateAddFab();
+}
+function headerMetaHtml(name, color, balanceHtml, clickable) {
+    const ink = textOnColor(color);
+    const inner = '<span class="name-badge" style="background:' + color + ';color:' + ink + '">' + escapeHtml(name) + '</span>' +
+        (balanceHtml != null ? '<span class="header-balance" id="headerPlayerBal">' + balanceHtml + '</span>' : '');
+    if (!clickable) return '<div class="header-player-meta">' + inner + '</div>';
+    return '<button type="button" class="header-player-meta header-watch" onclick="openWatchPlayerModal()">' + inner + '</button>';
+}
+function renderPlayerHeader() {
+    const right = document.getElementById('headerRight');
+    if (!right) return;
+    if (isPlayer()) {
+        const me = sessionPlayer();
+        const name = me ? me.name : ((appSession && appSession.name) || 'Pemain');
+        const color = me ? me.color : '#0f3d2e';
+        const bal = me ? ((me.balance < 0 ? '-' : '') + formatMoney(me.balance)) : '—';
+        right.innerHTML = headerMetaHtml(name, color, bal, false);
+        return;
+    }
+    const p = watchedPlayer();
+    if (!p) {
+        right.innerHTML = '<button type="button" class="header-player-meta header-watch" onclick="openWatchPlayerModal()">' +
+            '<span class="name-badge" style="background:#efe9dc;color:#334155">Pilih pemain</span></button>';
+        return;
+    }
+    const bal = (p.balance < 0 ? '-' : '') + formatMoney(p.balance);
+    right.innerHTML = headerMetaHtml(p.name, p.color, bal, true);
+}
+function openWatchPlayerModal() {
+    if (isPlayer()) return;
+    if (!state.players.length) {
+        showToast('Tambah pemain dulu', 'error');
+        return;
+    }
+    const sel = getWatchPlayerId();
+    openModal('<div class="text-xl font-extrabold mb-3 pr-10">Pantau pemain</div>' +
+        '<p class="text-xs mb-3" style="color:var(--muted)">Pilih pemain yang saldo namanya tampil di header</p>' +
+        '<div class="player-grid">' + playerGridHtml(sel, 'pickWatchPlayer', null) + '</div>');
+}
+function pickWatchPlayer(id) {
+    setWatchPlayerId(id);
+    closeModal();
+    renderPlayerHeader();
+}
+
+function ownedCount(playerId) {
+    return state.properties.filter(p => p.ownerId === playerId).length;
+}
+
+function renderPlayersView() {
+    const el = document.getElementById('view-players');
+    const total = state.players.reduce((s, p) => s + p.balance, 0);
+    const active = activePlayers().length;
+    let body = '<div class="hero-card mb-4">' +
+        '<div><p class="text-[11px] font-bold uppercase tracking-wider opacity-80">Total uang pemain</p>' +
+        '<p class="text-2xl font-extrabold mt-1" id="heroTotal">' + formatMoney(total) + '</p></div>' +
+        '<div class="text-right"><p class="text-[11px] font-bold uppercase tracking-wider opacity-80">Aktif</p>' +
+        '<p class="text-2xl font-extrabold">' + active + '</p></div></div>';
+    if (!state.players.length) {
+        body += '<div class="empty-card">' +
+            '<p class="text-3xl mb-2"><i class="fa-solid fa-dice" style="color:var(--felt)"></i></p>' +
+            '<p class="font-bold" style="color:var(--muted)">Belum ada pemain</p>' +
+            '<button type="button" onclick="openAddPlayerModal()" class="btn btn-recv mt-4"><i class="fa-solid fa-user-plus"></i> Tambah pemain</button></div>';
+    } else {
+        body += '<div class="space-y-2">' + state.players.map(p => {
+            const br = p.bankrupt ? ' bankrupt' : '';
+            return '<button type="button" class="player-card' + br + '" data-player-id="' + p.id + '" onclick="openPlayerSheet(\'' + p.id + '\')">' +
+                '<div class="player-avatar" style="background:' + p.color + '">' + escapeHtml(p.name.charAt(0).toUpperCase()) + '</div>' +
+                '<div class="flex-1 min-w-0"><p class="font-extrabold truncate">' + escapeHtml(p.name) +
+                (p.bankrupt ? ' <span class="badge" style="background:#fee2e2;color:#dc2626">Bangkrut</span>' : '') + '</p>' +
+                '<p class="player-balance font-extrabold text-lg ' + (p.balance >= 0 ? 'text-green-600' : 'text-red-500') + '">' +
+                (p.balance < 0 ? '-' : '') + formatMoney(p.balance) + '</p></div>' +
+                '<span class="chip">' + ownedCount(p.id) + ' aset</span>' +
+                '<i class="fa-solid fa-chevron-right" style="color:#c5c0b4"></i></button>';
+        }).join('') + '</div>';
+    }
+    el.innerHTML = body;
+}
+
+function renderAssetCatalog(el, opts) {
+    opts = opts || {};
+    const ownerId = opts.ownerId || null;
+    const q = opts.query || '';
+    const searchId = opts.searchId || 'assetSearch';
+    const keepFocus = document.activeElement && document.activeElement.id === searchId;
+    const caret = keepFocus ? document.activeElement.selectionStart : null;
+    const stock = houseStock();
+    let ownedTotal = 0;
+    if (ownerId) {
+        ownedTotal = state.properties.filter(function (p) { return p.ownerId === ownerId; }).length;
+    }
+    let html = '<div class="flex gap-2 mb-3">' +
+        '<span class="stock-chip"><i class="fa-solid fa-house" style="color:#0d9488"></i> Rumah ' + stock.houses + '/32</span>' +
+        '<span class="stock-chip"><i class="fa-solid fa-hotel" style="color:#7c3aed"></i> Hotel ' + stock.hotels + '/12</span></div>';
+    let shown = 0;
+    GROUP_ORDER.forEach(function (g) {
+        const meta = GROUP_META[g];
+        const letter = groupLetter(g);
+        const items = groupProps(g).filter(function (p) {
+            if (ownerId && p.ownerId !== ownerId) return false;
+            return propMatchesQuery(p, q);
+        });
+        if (!items.length) return;
+        shown += items.length;
+        html += '<h3 class="text-sm font-bold mb-2 mt-3 flex items-center gap-2">' +
+            '<span class="inline-block w-3 h-3 rounded" style="background:' + meta.color + '"></span>' +
+            '<span class="code-badge">' + letter + '</span> ' + meta.label + '</h3>';
+        html += '<div class="asset-grid mb-2">';
+        items.forEach(function (p) {
+            const owner = p.ownerId ? getPlayer(p.ownerId) : null;
+            const build = p.hotel ? '<i class="fa-solid fa-hotel"></i>' : (p.houses ? ('<i class="fa-solid fa-house"></i>'.repeat(p.houses)) : '');
+            html += '<button type="button" class="prop-card w-full" onclick="' + (isPlayer() ? 'openPropSheetPlayer' : 'openPropSheet') + '(\'' + p.id + '\')">' +
+                '<div class="prop-strip" style="background:' + meta.color + '"></div>' +
+                '<div class="p-2.5">' +
+                '<span class="code-badge">' + escapeHtml(propCode(p)) + '</span>' +
+                (p.mortgaged ? ' <span class="badge" style="background:#ffedd5;color:#ea580c">Hipotek</span>' : '') +
+                '<p class="prop-name mt-1">' + escapeHtml(p.name) + '</p>' +
+                '<p class="text-[10px] mt-0.5" style="color:var(--muted)">' + formatMoney(p.price) +
+                (build ? (' · ' + build) : '') + '</p>' +
+                '<p class="text-[11px] font-bold mt-1 truncate">' +
+                (owner ? ('<span style="color:' + owner.color + '">' + escapeHtml(owner.name) + '</span>') : '<span style="color:#9aa89f">Bank</span>') +
+                '</p></div></button>';
+        });
+        html += '</div>';
+    });
+    if (!shown) {
+        const emptyMsg = ownerId && !ownedTotal ? (opts.emptyZero || 'Belum punya aset') : (opts.emptyNone || 'Tidak ada aset yang cocok');
+        html += '<p class="empty-card text-sm" style="color:var(--muted)">' + emptyMsg + '</p>';
+    }
+    html += '<div class="asset-search-wrap">';
+    if (!ownerId) {
+        const qn = (q || '').trim().toLowerCase();
+        html += '<div class="search-chip-row">';
+        html += '<button type="button" class="search-suggest bank' + (qn === 'bank' ? ' active' : '') +
+            '" data-term="bank" data-search="' + searchId + '" onclick="fillAssetSearchFromChip(this)">Bank</button>';
+        state.players.forEach(function (pl) {
+            const on = qn === String(pl.name).toLowerCase();
+            html += '<button type="button" class="search-suggest' + (on ? ' active' : '') +
+                '" style="background:' + pl.color + ';color:' + textOnColor(pl.color) +
+                '" data-term="' + escapeHtml(pl.name) + '" data-search="' + searchId +
+                '" onclick="fillAssetSearchFromChip(this)">' + escapeHtml(pl.name) + '</button>';
+        });
+        html += '</div>';
+    }
+    html += '<div class="search-inner">' +
+        '<i class="fa-solid fa-magnifying-glass"></i>' +
+        '<input id="' + searchId + '" class="input-field" type="search" placeholder="' + escapeHtml(opts.placeholder || 'D, D1, atau nama') + '" ' +
+        'value="' + escapeHtml(q) + '" oninput="' + (opts.oninput || '') + '" autocomplete="off"></div></div>';
+    el.innerHTML = html;
+    const inp = document.getElementById(searchId);
+    if (inp && keepFocus) {
+        inp.focus();
+        if (caret != null) {
+            try { inp.setSelectionRange(caret, caret); } catch (e) {}
+        }
+    }
+}
+
+function renderBoardView() {
+    const el = document.getElementById('view-board');
+    if (!el) return;
+    renderAssetCatalog(el, {
+        query: assetSearchQuery,
+        searchId: 'assetSearch',
+        oninput: 'assetSearchQuery=this.value;renderBoardView()',
+        placeholder: 'D, D1, atau nama'
+    });
+}
+function fillAssetSearchFromChip(btn) {
+    const term = btn.getAttribute('data-term') || '';
+    const searchId = btn.getAttribute('data-search') || 'assetSearch';
+    const current = searchId === 'playerAssetSearch' ? playerAssetSearchQuery : assetSearchQuery;
+    if (String(current).trim().toLowerCase() === String(term).trim().toLowerCase()) {
+        fillAssetSearch('', searchId);
+        return;
+    }
+    fillAssetSearch(term, searchId);
+}
+function fillAssetSearch(term, searchId) {
+    term = term == null ? '' : String(term);
+    if (searchId === 'playerAssetSearch') {
+        playerAssetSearchQuery = term;
+        renderPlayerAssets();
+        return;
+    }
+    assetSearchQuery = term;
+    renderBoardView();
+}
+
+function txBorderClass(type) {
+    const map = {
+        go: 'tx-go', 'pay-bank': 'tx-pay', rent: 'tx-rent', 'recv-bank': 'tx-recv', p2p: 'tx-p2p',
+        buy: 'tx-buy', house: 'tx-house', hotel: 'tx-hotel', mortgage: 'tx-mortgage',
+        unmortgage: 'tx-unmortgage', deed: 'tx-deed', 'return': 'tx-return', 'sell-build': 'tx-recv', bangkrut: 'tx-pay'
+    };
+    return map[type] || '';
+}
+
+function renderCashView() {
+    const el = document.getElementById('view-cash');
+    const pending = (state.requests || []).filter(function (r) { return r.status === 'pending'; });
+    let pendingHtml = '';
+    if (isServerMode() && pending.length) {
+        pendingHtml = '<p class="section-label">Permintaan pemain</p>' + pending.map(reqHtmlBanker).join('') +
+            '<p class="section-label">Riwayat</p>';
+    }
+    el.innerHTML = '<div class="quick-action-grid mb-4">' +
+        '<button type="button" class="qa qa-go" onclick="openGoModal()"><i class="fa-solid fa-flag-checkered"></i>GO +' + formatMoney(state.settings.goAmount) + '</button>' +
+        '<button type="button" class="qa qa-pay" onclick="openPayBankModal()"><i class="fa-solid fa-building-columns"></i>Bayar bank</button>' +
+        '<button type="button" class="qa qa-recv" onclick="openReceiveBankModal()"><i class="fa-solid fa-hand-holding-dollar"></i>Terima bank</button>' +
+        '<button type="button" class="qa qa-xfer" onclick="openTransferModal()"><i class="fa-solid fa-arrow-right-arrow-left"></i>Transfer</button>' +
+        '</div>' + pendingHtml + (pendingHtml ? '' : '<p class="section-label">Riwayat</p>') +
+        txListHtml();
+}
+function txListHtml() {
+    const recent = state.transactions.slice(-40).reverse();
+    if (!recent.length) return '<p class="empty-card text-sm" style="color:var(--muted)">Belum ada transaksi</p>';
+    return recent.map(function (tx) {
+        const from = tx.from === 'bank' ? 'Bank' : (getPlayer(tx.from) || { name: '?' }).name;
+        const to = tx.to === 'bank' ? 'Bank' : (getPlayer(tx.to) || { name: '?' }).name;
+        const t = new Date(tx.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+        return '<div class="tx-item p-3 mb-2 ' + txBorderClass(tx.type) + '"><p class="text-xs font-bold">' + escapeHtml(from) + ' → ' + escapeHtml(to) +
+            '</p><p class="text-[10px]" style="color:var(--muted)">' + escapeHtml(tx.reason || '') + ' · ' + t + '</p>' +
+            '<p class="font-extrabold text-sm">' + formatMoney(tx.amount) + '</p></div>';
+    }).join('');
+}
+
+function renderSettingsView() {
+    const el = document.getElementById('view-settings');
+    const share = isServerMode()
+        ? '<label class="text-xs font-bold" style="color:var(--muted)">Tautan untuk pemain</label>' +
+            '<input class="input-field" id="shareUrl" readonly value="' + escapeHtml(location.origin + location.pathname) + '">' +
+            btnHtml('btn-ghost', 'fa-copy', 'Salin tautan', 'copyShareUrl()') +
+            '<p class="text-xs" style="color:var(--muted)">Bagikan ke perangkat di Wi-Fi yang sama. Pemain memilih peran Pemain lalu mengisi nama yang sudah Anda daftarkan. Buka app lewat IP LAN PC Laragon, bukan hanya localhost.</p>'
+        : '<p class="text-sm" style="color:var(--muted)">Data tersimpan di browser HP ini. Refresh tidak menghapus game.</p>';
+    const pending = (state.requests || []).filter(function (r) { return r.status === 'pending'; });
+    const pendingBlock = (isServerMode() && pending.length)
+        ? '<p class="section-label">Permintaan pending</p>' + pending.map(reqHtmlBanker).join('')
+        : '';
+    el.innerHTML = '<div class="settings-card space-y-3">' + share +
+        '<label class="text-xs font-bold" style="color:var(--muted)">Uang awal pemain baru</label>' +
+        '<input type="number" class="input-field" id="setStart" value="' + state.settings.startingCash + '" inputmode="numeric">' +
+        '<label class="text-xs font-bold" style="color:var(--muted)">Nominal GO</label>' +
+        '<input type="number" class="input-field" id="setGo" value="' + state.settings.goAmount + '" inputmode="numeric">' +
+        btnHtml('btn-recv', 'fa-floppy-disk', 'Simpan setelan', 'saveSettingsFromForm()') +
+        btnHtml('btn-ghost', 'fa-user-plus', 'Tambah pemain', 'openAddPlayerModal()') +
+        btnHtml('btn-danger', 'fa-rotate-left', 'Reset seluruh game', 'resetGame()') +
+        (isServerMode() ? btnHtml('btn-ghost', 'fa-right-from-bracket', 'Keluar', 'logoutSession()') +
+            '<p class="text-xs" style="color:var(--muted)">Keluar untuk ganti peran ke pemain.</p>' : '') +
+        pendingBlock +
+        muteToggleHtml() +
+        '<p class="text-xs" style="color:#9aa89f">Panduan: folder SDD/aturan-banker-monopoly.md</p></div>';
+}
+
+function saveSettingsFromForm() {
+    const s = parseFloat(document.getElementById('setStart').value);
+    const g = parseFloat(document.getElementById('setGo').value);
+    if (!isNaN(s) && s >= 0) state.settings.startingCash = s;
+    if (!isNaN(g) && g >= 0) state.settings.goAmount = g;
+    saveState();
+    showToast('Setelan disimpan', 'success');
+    renderAll();
+}
+
+function resetGame() {
+    if (isPlayer()) return;
+    if (!confirm('Hapus semua pemain, aset, dan riwayat?')) return;
+    state.players = [];
+    state.properties = catalog();
+    state.transactions = [];
+    state.requests = [];
+    state.lastFx = null;
+    state.debtSettlement = null;
+    state.colorIndex = 0;
+    saveState();
+    renderAll();
+    showToast('Game direset', 'success');
+}
+
+function openAddPlayerModal() {
+    if (isPlayer()) return;
+    openModal('<div class="text-xl font-extrabold mb-4 pr-10">Tambah pemain</div>' +
+        '<input id="newPlayerName" class="input-field mb-3" placeholder="Nama" maxlength="24" autocomplete="off">' +
+        '<input id="newPlayerBalance" class="input-field mb-4" type="number" value="' + state.settings.startingCash + '" inputmode="numeric">' +
+        btnHtml('btn-recv', 'fa-user-plus', 'Tambah', 'confirmAddPlayer()'));
+}
+function confirmAddPlayer() {
+    const name = (document.getElementById('newPlayerName').value || '').trim();
+    const bal = parseFloat(document.getElementById('newPlayerBalance').value);
+    if (!name) { showToast('Nama wajib', 'error'); return; }
+    if (isNaN(bal) || bal < 0) { showToast('Saldo tidak valid', 'error'); return; }
+    state.players.push({ id: generateId(), name: name, color: nextColor(), balance: bal, bankrupt: false });
+    const added = state.players[state.players.length - 1];
+    if (!getPlayer(getWatchPlayerId())) setWatchPlayerId(added.id);
+    closeModal();
+    renderAll();
+    showToast(name + ' ditambahkan', 'success');
+}
+
+function openPlayerSheet(id) {
+    const p = getPlayer(id);
+    if (!p) return;
+    const assets = state.properties.filter(x => x.ownerId === id);
+    const list = assets.length ? assets.map(a => {
+        const st = badgeStyle(a.group);
+        return '<button type="button" class="text-left w-full py-2 border-b text-sm" onclick="closeModal();openPropSheet(\'' + a.id + '\')"><span class="code-badge mr-1" style="' + st + '">' + escapeHtml(propCode(a)) + '</span> ' + escapeHtml(a.name) +
+        (a.mortgaged ? ' · hipotek' : '') + '</button>';
+    }).join('') : '<p class="text-sm" style="color:var(--muted)">Belum punya aset</p>';
+    openModal('<div class="text-xl font-extrabold mb-1 pr-10">' + escapeHtml(p.name) + '</div>' +
+        '<p class="text-2xl font-black mb-4 ' + (p.balance >= 0 ? 'text-green-600' : 'text-red-500') + '">' + formatMoney(p.balance) + '</p>' +
+        '<div class="quick-action-grid mb-4">' +
+        '<button type="button" class="qa qa-go" onclick="closeModal();openGoModal(\'' + id + '\')"><i class="fa-solid fa-flag-checkered"></i>GO</button>' +
+        '<button type="button" class="qa qa-pay" onclick="closeModal();openPayBankModal(\'' + id + '\')"><i class="fa-solid fa-building-columns"></i>Bayar</button>' +
+        '<button type="button" class="qa qa-recv" onclick="closeModal();openReceiveBankModal(\'' + id + '\')"><i class="fa-solid fa-hand-holding-dollar"></i>Terima</button>' +
+        '<button type="button" class="qa qa-xfer" onclick="closeModal();openTransferModal(\'' + id + '\')"><i class="fa-solid fa-arrow-right-arrow-left"></i>Transfer</button></div>' +
+        '<p class="section-label">Aset</p>' + list +
+        '<div class="flex gap-2 mt-4">' +
+        '<button type="button" class="btn btn-ghost" onclick="toggleBankrupt(\'' + id + '\')"><i class="fa-solid fa-ban"></i> ' + (p.bankrupt ? 'Batalkan bangkrut' : 'Tandai bangkrut') + '</button>' +
+        '<button type="button" class="btn btn-danger" onclick="deletePlayer(\'' + id + '\')"><i class="fa-solid fa-trash"></i> Hapus</button></div>');
+}
+
+function toggleBankrupt(id) {
+    const p = getPlayer(id);
+    if (!p) return;
+    p.bankrupt = !p.bankrupt;
+    if (p.bankrupt) {
+        releasePlayerAssetsToBank(id);
+        if (state.debtSettlement && state.debtSettlement.payerId === id) state.debtSettlement = null;
+    }
+    closeModal();
+    renderAll();
+    showToast(p.name + (p.bankrupt ? ' bangkrut' : ' aktif lagi'), 'success');
+}
+
+function deletePlayer(id) {
+    const p = getPlayer(id);
+    if (!p || !confirm('Hapus ' + p.name + '? Aset kembali ke bank.')) return;
+    state.properties.forEach(pr => {
+        if (pr.ownerId === id) { pr.ownerId = null; pr.houses = 0; pr.hotel = false; pr.mortgaged = false; }
+    });
+    state.players = state.players.filter(x => x.id !== id);
+    closeModal();
+    renderAll();
+    showToast('Pemain dihapus', 'success');
+}
+
+function openPropSheet(id) {
+    pickPlayerId = null;
+    pickToId = null;
+    pickExcludeId = null;
+    const p = getProp(id);
+    if (!p) return;
+    const owner = p.ownerId ? getPlayer(p.ownerId) : null;
+    const meta = GROUP_META[p.group];
+    const isStreet = p.houseCost > 0;
+    let rentText = '';
+    if (p.group === 'utility') rentText = 'Sewa: 4× atau 10× dadu';
+    else if (p.group === 'railroad') rentText = 'Sewa sekarang: ' + formatMoney(calcRailroadRent(p));
+    else rentText = 'Sewa sekarang: ' + formatMoney(calcStreetRent(p));
+
+    let actions = '';
+    if (!p.ownerId) {
+        actions += '<p class="section-label">Beli dari bank</p>' +
+            '<p class="text-xs mb-2" style="color:var(--muted)">Pilih pembeli (harga boleh diubah untuk lelang)</p>' +
+            '<div id="buyGrid" class="player-grid mb-3">' + playerGridHtml(pickPlayerId, 'setPickPlayer') + '</div>' +
+            amountFieldHtml('buyPrice', p.price) +
+            btnHtml('btn-recv', 'fa-cart-shopping', 'Beli dari bank', 'buyProperty(\'' + id + '\')');
+    } else {
+        pickExcludeId = p.ownerId;
+        actions += '<p class="text-sm mb-2">Pemilik: <b>' + escapeHtml(owner ? owner.name : '?') + '</b></p>';
+        actions += '<p class="section-label">Pilih pemain</p>' +
+            '<p class="text-[11px] mb-1" style="color:var(--muted)">Untuk tagih sewa atau serahkan aset</p>' +
+            '<div id="actionGrid" class="player-grid mb-2">' + playerGridHtml(pickPlayerId, 'setPickPlayer', pickExcludeId) + '</div>';
+        if (!p.mortgaged) {
+            if (p.group === 'utility') {
+                actions += '<input id="diceValue" class="input-field mb-3" type="number" placeholder="Jumlah dadu (2–12)" min="2" max="12" inputmode="numeric">';
+            }
+            actions += btnHtml('btn-rent mb-2', 'fa-hand-holding-dollar', 'Tagih sewa ' + (p.group === 'utility' ? '' : formatMoney(calcRent(p))), 'collectRent(\'' + id + '\')');
+        } else {
+            actions += '<p class="text-xs p-3 rounded-xl mb-3" style="background:#ffedd5;color:#9a3412"><i class="fa-solid fa-file-invoice-dollar"></i> Hipotek — tidak ada sewa</p>';
+        }
+        if (isStreet) {
+            actions += '<p class="section-label">Bangunan</p><div class="flex gap-2 mb-1.5">' +
+                '<button type="button" class="btn btn-build" onclick="buildHouse(\'' + id + '\')"><i class="fa-solid fa-house"></i> Rumah ' + formatMoney(p.houseCost) + '</button>' +
+                '<button type="button" class="btn btn-hotel" onclick="buildHotel(\'' + id + '\')"><i class="fa-solid fa-hotel"></i> Hotel</button></div>' +
+                '<button type="button" class="btn btn-ghost mb-1.5" onclick="sellHouse(\'' + id + '\')"><i class="fa-solid fa-arrow-down"></i> Jual 1 rumah (50%)</button>';
+        }
+        actions += '<p class="section-label">Hipotek</p>';
+        if (!p.mortgaged) actions += '<button type="button" class="btn btn-mortgage mb-1.5" onclick="mortgageProp(\'' + id + '\')"><i class="fa-solid fa-file-invoice-dollar"></i> Hipotek +' + formatMoney(p.mortgage) + '</button>';
+        else actions += '<button type="button" class="btn btn-recv mb-1.5" onclick="unmortgageProp(\'' + id + '\')"><i class="fa-solid fa-unlock"></i> Tebus ' + formatMoney(Math.round(p.mortgage * 1.1)) + '</button>';
+        actions += '<p class="section-label">Perdagangan</p>' +
+            '<button type="button" class="btn btn-xfer mb-2" onclick="transferProperty(\'' + id + '\')"><i class="fa-solid fa-handshake"></i> Serahkan aset</button>' +
+            '<button type="button" class="btn btn-danger" onclick="returnToBank(\'' + id + '\')"><i class="fa-solid fa-building-columns"></i> Kembalikan ke bank</button>';
+    }
+
+    openModal('<div class="h-1.5 rounded-full mb-2" style="background:' + meta.color + '"></div>' +
+        '<div class="text-lg font-extrabold mb-0.5 pr-10 leading-tight"><span class="code-badge align-middle mr-1">' + escapeHtml(propCode(p)) + '</span> ' + escapeHtml(p.name) + '</div>' +
+        '<p class="text-[11px] mb-2" style="color:var(--muted)">' + formatMoney(p.price) + ' · hipotek ' + formatMoney(p.mortgage) + ' · ' + rentText +
+        (p.hotel ? ' · <i class="fa-solid fa-hotel"></i> Hotel' : (p.houses ? ' · ' + p.houses + ' rumah' : '')) + '</p>' + actions);
+}
+
+function setPickPlayer(id) {
+    pickPlayerId = pickPlayerId === id ? null : id;
+    const g = document.getElementById('buyGrid') || document.getElementById('actionGrid');
+    if (g) g.innerHTML = playerGridHtml(pickPlayerId, 'setPickPlayer', pickExcludeId);
+}
+function setPickTo(id) {
+    pickToId = pickToId === id ? null : id;
+    const g = document.getElementById('tradeGrid');
+    if (g) g.innerHTML = playerGridHtml(pickToId, 'setPickTo');
+}
+
+function buyProperty(propId) {
+    const p = getProp(propId);
+    const buyer = getPlayer(pickPlayerId);
+    const price = parseFloat(document.getElementById('buyPrice').value);
+    if (!p || p.ownerId) { showToast('Sudah dimiliki', 'error'); return; }
+    if (!buyer) { showToast('Pilih pembeli', 'error'); return; }
+    if (isNaN(price) || price < 0) { showToast('Harga tidak valid', 'error'); return; }
+    if (!canAfford(buyer, price)) return;
+    const old = snapshotBalances();
+    buyer.balance -= price;
+    p.ownerId = buyer.id;
+    pushTx({ type: 'buy', from: buyer.id, to: 'bank', propertyId: p.id, amount: price, reason: 'Beli ' + p.name });
+    finishMoney(buyer.id, 'bank', old, buyer.name + ' beli ' + p.name, price);
+}
+
+function collectRent(propId) {
+    const p = getProp(propId);
+    const payer = getPlayer(pickPlayerId);
+    if (!p || !p.ownerId || p.mortgaged) { showToast('Tidak bisa ditagih', 'error'); return; }
+    if (!payer) { showToast('Pilih pembayar', 'error'); return; }
+    if (payer.id === p.ownerId) { showToast('Pemilik tidak bayar sewa', 'error'); return; }
+    let dice = 7;
+    if (p.group === 'utility') {
+        dice = parseFloat((document.getElementById('diceValue') || {}).value);
+        if (isNaN(dice) || dice < 2 || dice > 12) { showToast('Isi dadu 2–12', 'error'); return; }
+    }
+    const amount = calcRent(p, dice);
+    if (amount <= 0) { showToast('Sewa 0', 'error'); return; }
+    const owner = getPlayer(p.ownerId);
+    applyRentDue(payer, owner, amount, p.id);
+}
+
+function canPlayerBuildHouse(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner || p.houseCost <= 0) return { ok: false, reason: 'Bukan tanah yang bisa dibangun' };
+    if (p.mortgaged || p.hotel) return { ok: false, reason: 'Tidak bisa bangun' };
+    if (!groupProps(p.group).every(function (x) { return x.ownerId === owner.id; })) return { ok: false, reason: 'Butuh set warna lengkap' };
+    if (groupProps(p.group).some(function (x) { return x.mortgaged; })) return { ok: false, reason: 'Ada tanah hipotek di set' };
+    if (p.houses >= 4) return { ok: false, reason: 'Sudah 4 rumah, pakai Hotel' };
+    if (!evenBuildOk(p, p.houses + 1, false)) return { ok: false, reason: 'Even-build: rata dulu' };
+    if (houseStock().houses >= 32) return { ok: false, reason: 'Stok rumah habis' };
+    if (owner.balance < p.houseCost) return { ok: false, reason: 'Saldo tidak cukup (' + signedMoney(owner.balance) + ')' };
+    return { ok: true };
+}
+function canPlayerBuildHotel(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner || p.houseCost <= 0) return { ok: false, reason: 'Bukan tanah yang bisa dibangun' };
+    if (p.hotel || p.houses !== 4) return { ok: false, reason: 'Perlu 4 rumah dulu' };
+    if (!evenBuildOk(p, 0, true)) return { ok: false, reason: 'Even-build hotel' };
+    if (houseStock().hotels >= 12) return { ok: false, reason: 'Stok hotel habis' };
+    if (owner.balance < p.houseCost) return { ok: false, reason: 'Saldo tidak cukup (' + signedMoney(owner.balance) + ')' };
+    return { ok: true };
+}
+function canPlayerSellBuild(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner || p.houseCost <= 0) return { ok: false, reason: 'Tidak ada bangunan' };
+    if (p.hotel) {
+        if (!evenBuildOk(p, 4, false)) return { ok: false, reason: 'Even-sell dulu set lain' };
+        return { ok: true };
+    }
+    if (p.houses > 0) {
+        if (!evenBuildOk(p, p.houses - 1, false)) return { ok: false, reason: 'Even-sell' };
+        return { ok: true };
+    }
+    return { ok: false, reason: 'Tidak ada bangunan' };
+}
+function canPlayerMortgage(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner || p.mortgaged) return { ok: false, reason: 'Tidak bisa hipotek' };
+    if (p.houses > 0 || p.hotel || buildingsOnGroup(p.group)) return { ok: false, reason: 'Jual semua rumah di set dulu' };
+    return { ok: true };
+}
+function canPlayerUnmortgage(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner || !p.mortgaged) return { ok: false, reason: 'Tidak sedang hipotek' };
+    const cost = Math.round(p.mortgage * 1.1);
+    if (owner.balance < cost) return { ok: false, reason: 'Saldo tidak cukup (' + signedMoney(owner.balance) + ')' };
+    return { ok: true };
+}
+
+function buildHouse(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner || p.houseCost <= 0) return;
+    if (p.mortgaged || p.hotel) { showToast('Tidak bisa bangun', 'error'); return; }
+    if (!groupProps(p.group).every(x => x.ownerId === owner.id)) {
+        showToast('Butuh set warna lengkap', 'error'); return;
+    }
+    if (groupProps(p.group).some(x => x.mortgaged)) { showToast('Ada tanah hipotek di set', 'error'); return; }
+    if (p.houses >= 4) { showToast('Sudah 4 rumah, pakai Hotel', 'error'); return; }
+    if (!evenBuildOk(p, p.houses + 1, false)) { showToast('Even-build: rata dulu', 'error'); return; }
+    if (houseStock().houses >= 32) { showToast('Stok rumah habis', 'error'); return; }
+    if (!canAfford(owner, p.houseCost)) return;
+    const old = snapshotBalances();
+    owner.balance -= p.houseCost;
+    p.houses += 1;
+    pushTx({ type: 'house', from: owner.id, to: 'bank', propertyId: p.id, amount: p.houseCost, reason: 'Rumah ' + p.name });
+    finishMoney(owner.id, 'bank', old, 'Rumah dibangun', p.houseCost);
+}
+
+function buildHotel(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner) return;
+    if (p.hotel || p.houses !== 4) { showToast('Perlu 4 rumah dulu', 'error'); return; }
+    if (!evenBuildOk(p, 0, true)) { showToast('Even-build hotel', 'error'); return; }
+    if (houseStock().hotels >= 12) { showToast('Stok hotel habis', 'error'); return; }
+    if (!canAfford(owner, p.houseCost)) return;
+    const old = snapshotBalances();
+    owner.balance -= p.houseCost;
+    p.houses = 0;
+    p.hotel = true;
+    pushTx({ type: 'hotel', from: owner.id, to: 'bank', propertyId: p.id, amount: p.houseCost, reason: 'Hotel ' + p.name });
+    finishMoney(owner.id, 'bank', old, 'Hotel dibangun', p.houseCost);
+}
+
+function sellHouse(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner) return;
+    const refund = Math.floor(p.houseCost / 2);
+    const old = snapshotBalances();
+    if (p.hotel) {
+        if (!evenBuildOk(p, 4, false)) { showToast('Even-sell dulu set lain', 'error'); return; }
+        p.hotel = false;
+        p.houses = 4;
+        owner.balance += refund;
+        pushTx({ type: 'sell-build', from: 'bank', to: owner.id, propertyId: p.id, amount: refund, reason: 'Turun hotel ' + p.name });
+    } else if (p.houses > 0) {
+        if (!evenBuildOk(p, p.houses - 1, false)) { showToast('Even-sell', 'error'); return; }
+        p.houses -= 1;
+        owner.balance += refund;
+        pushTx({ type: 'sell-build', from: 'bank', to: owner.id, propertyId: p.id, amount: refund, reason: 'Jual rumah ' + p.name });
+    } else { showToast('Tidak ada bangunan', 'error'); return; }
+    finishMoney('bank', owner.id, old, 'Dijual ke bank ' + formatMoney(refund), refund);
+}
+
+function mortgageProp(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner || p.mortgaged) return;
+    if (p.houses > 0 || p.hotel || buildingsOnGroup(p.group)) {
+        showToast('Jual semua rumah di set dulu', 'error'); return;
+    }
+    const old = snapshotBalances();
+    p.mortgaged = true;
+    owner.balance += p.mortgage;
+    pushTx({ type: 'mortgage', from: 'bank', to: owner.id, propertyId: p.id, amount: p.mortgage, reason: 'Hipotek ' + p.name });
+    finishMoney('bank', owner.id, old, 'Hipotek ' + formatMoney(p.mortgage), p.mortgage);
+}
+
+function unmortgageProp(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner || !p.mortgaged) return;
+    const cost = Math.round(p.mortgage * 1.1);
+    if (!canAfford(owner, cost)) return;
+    const old = snapshotBalances();
+    owner.balance -= cost;
+    p.mortgaged = false;
+    pushTx({ type: 'unmortgage', from: owner.id, to: 'bank', propertyId: p.id, amount: cost, reason: 'Tebus ' + p.name });
+    finishMoney(owner.id, 'bank', old, 'Tebus ' + formatMoney(cost), cost);
+}
+
+function transferProperty(propId) {
+    const p = getProp(propId);
+    const to = getPlayer(pickPlayerId);
+    if (!p || !to) { showToast('Pilih penerima', 'error'); return; }
+    if (p.ownerId === to.id) { showToast('Sudah milik pemain itu', 'error'); return; }
+    if (p.houses > 0 || p.hotel) { showToast('Jual bangunan dulu', 'error'); return; }
+    p.ownerId = to.id;
+    pushTx({ type: 'deed', from: 'trade', to: to.id, propertyId: p.id, amount: 0, reason: 'Alih ' + p.name + ' ke ' + to.name });
+    closeModal();
+    renderAll();
+    showToast('Aset dipindah', 'success');
+}
+
+function returnToBank(propId) {
+    const p = getProp(propId);
+    if (!p || !confirm('Kembalikan ke bank?')) return;
+    p.ownerId = null; p.houses = 0; p.hotel = false; p.mortgaged = false;
+    pushTx({ type: 'return', from: 'player', to: 'bank', propertyId: p.id, amount: 0, reason: 'Kembali ' + p.name });
+    closeModal();
+    renderAll();
+    showToast('Kembali ke bank', 'success');
+}
+
+function openGoModal(preset) {
+    if (!activePlayers().length) { showToast('Tidak ada pemain', 'error'); return; }
+    pickPlayerId = preset || null;
+    openModal('<div class="text-xl font-extrabold mb-3 pr-10">GO +' + formatMoney(state.settings.goAmount) + '</div>' +
+        '<div id="goGrid" class="player-grid mb-4">' + playerGridHtml(pickPlayerId, 'setGoPick') + '</div>' +
+        btnHtml('btn-go', 'fa-flag-checkered', 'Terima gaji', 'confirmGo()'));
+}
+function setGoPick(id) {
+    pickPlayerId = pickPlayerId === id ? null : id;
+    const g = document.getElementById('goGrid');
+    if (g) g.innerHTML = playerGridHtml(pickPlayerId, 'setGoPick');
+}
+function confirmGo() {
+    const p = getPlayer(pickPlayerId);
+    if (!p) { showToast('Pilih pemain', 'error'); return; }
+    const old = snapshotBalances();
+    p.balance += state.settings.goAmount;
+    pushTx({ type: 'go', from: 'bank', to: p.id, amount: state.settings.goAmount, reason: 'GO' });
+    finishMoney('bank', p.id, old, p.name + ' +' + formatMoney(state.settings.goAmount), state.settings.goAmount);
+}
+
+function openPayBankModal(preset) {
+    if (!activePlayers().length) { showToast('Tidak ada pemain', 'error'); return; }
+    pickPlayerId = preset || null;
+    openModal('<div class="text-xl font-extrabold mb-3 pr-10">Bayar ke bank</div>' +
+        '<div id="payGrid" class="player-grid mb-3">' + playerGridHtml(pickPlayerId, 'setPayPick') + '</div>' +
+        amountFieldHtml('payAmt', state.settings.incomeTax) +
+        '<select id="payReason" class="select-field mb-3">' +
+        '<option value="Income Tax">Income Tax (' + formatMoney(state.settings.incomeTax) + ')</option>' +
+        '<option value="Luxury Tax">Luxury Tax (' + formatMoney(state.settings.luxuryTax) + ')</option>' +
+        '<option value="Penjara">Keluar penjara ($50)</option>' +
+        '<option value="Kartu">Kartu</option>' +
+        '<option value="Lainnya">Lainnya</option></select>' +
+        btnHtml('btn-pay', 'fa-building-columns', 'Bayar', 'confirmPayBank()'));
+    document.getElementById('payReason').addEventListener('change', function () {
+        const m = { 'Income Tax': state.settings.incomeTax, 'Luxury Tax': state.settings.luxuryTax, 'Penjara': 50 };
+        if (m[this.value]) document.getElementById('payAmt').value = m[this.value];
+    });
+    document.getElementById('payAmt').value = state.settings.incomeTax;
+}
+function setPayPick(id) {
+    pickPlayerId = pickPlayerId === id ? null : id;
+    const g = document.getElementById('payGrid');
+    if (g) g.innerHTML = playerGridHtml(pickPlayerId, 'setPayPick');
+}
+function confirmPayBank() {
+    const p = getPlayer(pickPlayerId);
+    const amt = parseFloat(document.getElementById('payAmt').value);
+    const reason = document.getElementById('payReason').value;
+    if (!p) { showToast('Pilih pemain', 'error'); return; }
+    if (isNaN(amt) || amt <= 0) { showToast('Jumlah salah', 'error'); return; }
+    applyPayBankDue(p, amt, reason);
+}
+
+function openReceiveBankModal(preset) {
+    if (!activePlayers().length) { showToast('Tidak ada pemain', 'error'); return; }
+    pickPlayerId = preset || null;
+    openModal('<div class="text-xl font-extrabold mb-3 pr-10">Terima dari bank</div>' +
+        '<div id="recvGrid" class="player-grid mb-3">' + playerGridHtml(pickPlayerId, 'setRecvPick') + '</div>' +
+        '<input id="recvAmt" class="input-field mb-3" type="number" placeholder="Jumlah" inputmode="numeric">' +
+        '<select id="recvReason" class="select-field mb-3">' +
+        '<option>Kartu</option><option>Gaji lain</option><option>Lainnya</option></select>' +
+        btnHtml('btn-recv', 'fa-hand-holding-dollar', 'Terima', 'confirmReceive()'));
+}
+function setRecvPick(id) {
+    pickPlayerId = pickPlayerId === id ? null : id;
+    const g = document.getElementById('recvGrid');
+    if (g) g.innerHTML = playerGridHtml(pickPlayerId, 'setRecvPick');
+}
+function confirmReceive() {
+    const p = getPlayer(pickPlayerId);
+    const amt = parseFloat(document.getElementById('recvAmt').value);
+    const reason = document.getElementById('recvReason').value;
+    if (!p) { showToast('Pilih pemain', 'error'); return; }
+    if (isNaN(amt) || amt <= 0) { showToast('Jumlah salah', 'error'); return; }
+    const old = snapshotBalances();
+    p.balance += amt;
+    pushTx({ type: 'recv-bank', from: 'bank', to: p.id, amount: amt, reason: reason });
+    finishMoney('bank', p.id, old, p.name + ' terima ' + formatMoney(amt), amt);
+}
+
+function openTransferModal(presetFrom) {
+    if (activePlayers().length < 2) { showToast('Butuh 2 pemain', 'error'); return; }
+    pickFromId = presetFrom || null;
+    pickToId = null;
+    openModal('<div class="text-xl font-extrabold mb-2 pr-10">Transfer uang</div>' +
+        '<p class="text-xs font-bold mb-1" style="color:var(--muted)">Dari</p><div id="fromGrid" class="player-grid mb-3">' + playerGridHtml(pickFromId, 'setFrom') + '</div>' +
+        '<p class="text-xs font-bold mb-1" style="color:var(--muted)">Ke</p><div id="toGrid" class="player-grid mb-3">' + playerGridHtml(pickToId, 'setTo') + '</div>' +
+        amountFieldHtml('trAmt', '') +
+        '<select id="trReason" class="select-field mb-3"><option>Sewa</option><option>Jual beli</option><option>Kartu</option><option>Lainnya</option></select>' +
+        btnHtml('btn-xfer', 'fa-arrow-right-arrow-left', 'Transfer', 'confirmTransfer()'));
+}
+function setFrom(id) {
+    pickFromId = pickFromId === id ? null : id;
+    if (pickToId === pickFromId) pickToId = null;
+    document.getElementById('fromGrid').innerHTML = playerGridHtml(pickFromId, 'setFrom');
+    document.getElementById('toGrid').innerHTML = playerGridHtml(pickToId, 'setTo');
+}
+function setTo(id) {
+    if (id === pickFromId) { showToast('Pemain tidak boleh sama', 'error'); return; }
+    pickToId = pickToId === id ? null : id;
+    document.getElementById('toGrid').innerHTML = playerGridHtml(pickToId, 'setTo');
+}
+function confirmTransfer() {
+    const a = getPlayer(pickFromId);
+    const b = getPlayer(pickToId);
+    const amt = parseFloat(document.getElementById('trAmt').value);
+    const reason = document.getElementById('trReason').value;
+    if (!a || !b) { showToast('Pilih dari dan ke', 'error'); return; }
+    if (isNaN(amt) || amt <= 0) { showToast('Jumlah salah', 'error'); return; }
+    if (!canAfford(a, amt)) return;
+    const old = snapshotBalances();
+    a.balance -= amt;
+    b.balance += amt;
+    pushTx({ type: 'p2p', from: a.id, to: b.id, amount: amt, reason: reason });
+    finishMoney(a.id, b.id, old, a.name + ' → ' + b.name + ' ' + formatMoney(amt), amt);
+}
+
+function copyShareUrl() {
+    const url = location.origin + location.pathname;
+    function ok() { showToast('Tautan disalin', 'success'); }
+    function fallbackCopy() {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); ok(); } catch (e) { showToast('Salin manual: ' + url, 'error'); }
+        ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(ok).catch(fallbackCopy);
+    } else fallbackCopy();
+}
+
+function requestTheme(type, kind) {
+    if (type === 'build' && kind === 'hotel') {
+        return { title: 'Bangun hotel', icon: 'fa-hotel', color: '#7c3aed', flow: 'Pemain → bank' };
+    }
+    if (type === 'build' && kind === 'sell') {
+        return { title: 'Jual bangunan', icon: 'fa-arrow-down', color: '#16a34a', flow: 'Bank → pemain' };
+    }
+    const map = {
+        go: { title: 'Gaji GO', icon: 'fa-flag-checkered', color: '#d97706', flow: 'Bank → pemain' },
+        pay_bank: { title: 'Bayar ke bank', icon: 'fa-building-columns', color: '#dc2626', flow: 'Pemain → bank' },
+        recv_bank: { title: 'Terima dari bank', icon: 'fa-hand-holding-dollar', color: '#16a34a', flow: 'Bank → pemain' },
+        transfer: { title: 'Transfer pemain', icon: 'fa-arrow-right-arrow-left', color: '#2563eb', flow: 'Pemain → pemain' },
+        rent: { title: 'Tagih sewa', icon: 'fa-hand-holding-dollar', color: '#dc2626', flow: 'Penyewa → pemilik' },
+        buy: { title: 'Beli aset', icon: 'fa-cart-shopping', color: '#16a34a', flow: 'Pemain → bank' },
+        build: { title: 'Bangun rumah', icon: 'fa-house', color: '#0d9488', flow: 'Pemain → bank' },
+        mortgage: { title: 'Hipotek', icon: 'fa-file-invoice-dollar', color: '#ea580c', flow: 'Bank → pemain' },
+        unmortgage: { title: 'Tebus hipotek', icon: 'fa-unlock', color: '#ea580c', flow: 'Pemain → bank' }
+    };
+    return map[type] || { title: type || 'Permintaan', icon: 'fa-bell', color: '#64748b', flow: '' };
+}
+function reqLabel(req) {
+    return requestTheme(req.type, (req.payload || {}).kind).title;
+}
+function miniAvatarHtml(p) {
+    if (!p) return '?';
+    return '<span class="req-player-tag" style="background:' + p.color + ';color:#fff">' +
+        '<span class="req-av" style="background:rgba(255,255,255,.25);color:#fff">' + escapeHtml(p.name.charAt(0).toUpperCase()) + '</span>' +
+        escapeHtml(p.name) + '</span>';
+}
+function reqRow(label, valueHtml) {
+    return '<div class="req-row"><span>' + escapeHtml(label) + '</span><b>' + valueHtml + '</b></div>';
+}
+function requestAmount(req) {
+    const pl = req.payload || {};
+    const prop = pl.propertyId ? getProp(pl.propertyId) : null;
+    if (req.type === 'go') return state.settings.goAmount;
+    if (req.type === 'pay_bank' || req.type === 'recv_bank' || req.type === 'transfer' || req.type === 'buy') {
+        const n = parseFloat(pl.amount);
+        return isNaN(n) ? null : n;
+    }
+    if (req.type === 'rent' && prop) {
+        const dice = pl.dice;
+        return calcRent(prop, dice);
+    }
+    if (req.type === 'build' && prop) {
+        if (pl.kind === 'sell') return Math.floor(prop.houseCost / 2);
+        return prop.houseCost;
+    }
+    if (req.type === 'mortgage' && prop) return prop.mortgage;
+    if (req.type === 'unmortgage' && prop) return Math.round(prop.mortgage * 1.1);
+    return null;
+}
+function reqDetail(req) {
+    const th = requestTheme(req.type, (req.payload || {}).kind);
+    const amt = requestAmount(req);
+    const bits = [th.title];
+    if (amt != null) bits.push(formatMoney(amt));
+    const pl = req.payload || {};
+    if (pl.propertyId) {
+        const pr = getProp(pl.propertyId);
+        if (pr) bits.push(pr.name);
+    }
+    if (pl.reason) bits.push(pl.reason);
+    if (pl.toPlayerId) {
+        const t = getPlayer(pl.toPlayerId);
+        if (t) bits.push('ke ' + t.name);
+    }
+    if (pl.payerId) {
+        const pay = getPlayer(pl.payerId);
+        if (pay) bits.push('dari ' + pay.name);
+    }
+    return bits.join(' · ');
+}
+function requestPopupHtml(req) {
+    const pl = req.payload || {};
+    const th = requestTheme(req.type, pl.kind);
+    const who = getPlayer(req.playerId);
+    const amt = requestAmount(req);
+    const prop = pl.propertyId ? getProp(pl.propertyId) : null;
+    const meta = prop ? GROUP_META[prop.group] : null;
+    let rows = reqRow('Pemain', miniAvatarHtml(who));
+    if (th.flow) rows += reqRow('Arah', escapeHtml(th.flow));
+    if (req.type === 'transfer') rows += reqRow('Ke', miniAvatarHtml(getPlayer(pl.toPlayerId)));
+    if (req.type === 'rent') {
+        rows += reqRow('Pemilik', miniAvatarHtml(getPlayer(prop && prop.ownerId ? prop.ownerId : req.playerId)));
+        rows += reqRow('Pembayar', miniAvatarHtml(getPlayer(pl.payerId)));
+    }
+    if (prop) {
+        const tagBg = (GROUP_META[prop.group] || { color: '#1a2e24' }).color;
+        rows += reqRow('Aset', '<span class="code-badge mr-1" style="background:' + tagBg + ';color:#fff">' + escapeHtml(propCode(prop)) + '</span> ' + escapeHtml(prop.name));
+    }
+    if (pl.reason) rows += reqRow('Alasan', escapeHtml(pl.reason));
+    if (req.type === 'rent' && prop && prop.group === 'utility' && pl.dice) rows += reqRow('Dadu', escapeHtml(String(pl.dice)));
+    if (req.type === 'build') rows += reqRow('Bangunan', escapeHtml(pl.kind === 'hotel' ? 'Hotel' : (pl.kind === 'sell' ? 'Jual 1' : 'Rumah')));
+    return '<div class="req-head" style="background:' + th.color + '">' +
+        '<div class="req-icon"><i class="fa-solid ' + th.icon + '"></i></div>' +
+        '<div><p class="text-[11px] font-extrabold uppercase tracking-wider opacity-80">Permintaan</p>' +
+        '<p class="text-lg font-extrabold leading-tight">' + escapeHtml(th.title) + '</p></div></div>' +
+        (amt != null ? '<p class="req-amt" style="color:' + th.color + '">' + formatMoney(amt) + '</p>' : '') +
+        (meta ? '<div class="h-1.5 rounded-full mb-3" style="background:' + meta.color + '"></div>' : '') +
+        rows;
+}
+function reqHtmlBanker(req) {
+    const th = requestTheme(req.type, (req.payload || {}).kind);
+    const p = getPlayer(req.playerId);
+    const amt = requestAmount(req);
+    return '<div class="tx-item req-list p-3 mb-2">' +
+        '<div class="req-list-strip" style="background:' + th.color + '"></div>' +
+        '<p class="text-[10px] font-extrabold uppercase tracking-wider" style="color:' + th.color + '">' + escapeHtml(th.title) + '</p>' +
+        '<p class="text-xs font-bold mt-0.5">' + miniAvatarHtml(p) + (amt != null ? ' · ' + formatMoney(amt) : '') + '</p>' +
+        '<p class="text-[10px] mt-1" style="color:var(--muted)">' + escapeHtml(reqDetail(req)) + '</p>' +
+        '<div class="flex gap-2 mt-2">' +
+        '<button type="button" class="btn btn-recv" style="min-height:40px" onclick="approveRequest(\'' + req.id + '\')">Setujui</button>' +
+        '<button type="button" class="btn btn-danger" style="min-height:40px" onclick="rejectRequest(\'' + req.id + '\')">Tolak</button></div></div>';
+}
+function enqueueRequest(type, payload) {
+    if (!playerCanRequest()) { showToast('Tidak bisa mengirim permintaan', 'error'); return; }
+    payload = payload || {};
+    if (type === 'build' && payload.propertyId) {
+        const kind = payload.kind;
+        const r = kind === 'hotel' ? canPlayerBuildHotel(payload.propertyId)
+            : (kind === 'sell' ? canPlayerSellBuild(payload.propertyId) : canPlayerBuildHouse(payload.propertyId));
+        if (!r.ok) { showToast(r.reason, 'error'); return; }
+    }
+    if (type === 'mortgage' && payload.propertyId) {
+        const r = canPlayerMortgage(payload.propertyId);
+        if (!r.ok) { showToast(r.reason, 'error'); return; }
+    }
+    if (type === 'unmortgage' && payload.propertyId) {
+        const r = canPlayerUnmortgage(payload.propertyId);
+        if (!r.ok) { showToast(r.reason, 'error'); return; }
+    }
+    if (type === 'rent') {
+        const p = getProp(payload.propertyId);
+        const me = sessionPlayer();
+        const payer = getPlayer(payload.payerId);
+        if (!p || !me || p.ownerId !== me.id) { showToast('Hanya pemilik yang menagih', 'error'); return; }
+        if (p.mortgaged) { showToast('Aset hipotek tidak bisa ditagih', 'error'); return; }
+        if (!payer || payer.id === me.id) { showToast('Pilih pemain yang mendarat', 'error'); return; }
+        if (p.group === 'utility') {
+            const dice = parseFloat(payload.dice);
+            if (isNaN(dice) || dice < 2 || dice > 12) { showToast('Dadu 2–12', 'error'); return; }
+        }
+        const rentAmt = calcRent(p, payload.dice);
+        if (rentAmt > 0 && playerLiquidity(payer.id) < rentAmt) {
+            showToast('Likuiditas pembayar kurang dari sewa', 'error');
+        }
+    }
+    if (type === 'pay_bank') {
+        const me = sessionPlayer();
+        const amt = parseFloat(payload.amount);
+        if (me && !isNaN(amt) && amt > 0 && playerLiquidity(me.id) < amt) {
+            showToast('Likuiditas kurang dari tagihan bank', 'error');
+        }
+    }
+    if (!Array.isArray(state.requests)) state.requests = [];
+    state.requests.push({
+        id: generateId(),
+        playerId: appSession.playerId,
+        type: type,
+        payload: payload || {},
+        status: 'pending',
+        createdAt: Date.now(),
+        resolvedAt: null,
+        bankerNote: ''
+    });
+    closeModal();
+    renderAll();
+    showToast('Permintaan dikirim', 'success');
+}
+
+function renderPlayerHome() {
+    const el = document.getElementById('view-players');
+    const me = sessionPlayer();
+    if (!me) {
+        el.innerHTML = '<p class="empty-card">Sesi pemain tidak valid.</p>' + btnHtml('btn-ghost', 'fa-right-from-bracket', 'Keluar', 'logoutSession()');
+        return;
+    }
+    const can = playerCanRequest();
+    const ink = textOnColor(me.color);
+    el.innerHTML = '<div class="hero-card mb-4"><div><span class="name-badge" style="background:' + me.color + ';color:' + ink + '">' + escapeHtml(me.name) +
+        '</span><p class="text-2xl font-extrabold mt-2">' + formatMoney(me.balance) + '</p></div>' +
+        '<div class="text-right">' + (me.bankrupt ? '<span class="badge" style="background:#fee2e2;color:#dc2626">Bangkrut</span>' : '<span class="player-chip">PEMAIN</span>') + '</div></div>' +
+        (can ? '<div class="quick-action-grid mb-4">' +
+            '<button type="button" class="qa qa-go" onclick="playerRequestGo()"><i class="fa-solid fa-flag-checkered"></i>Request GO</button>' +
+            '<button type="button" class="qa qa-pay" onclick="playerRequestPay()"><i class="fa-solid fa-building-columns"></i>Bayar bank</button>' +
+            '<button type="button" class="qa qa-recv" onclick="playerRequestRecv()"><i class="fa-solid fa-hand-holding-dollar"></i>Terima bank</button>' +
+            '<button type="button" class="qa qa-xfer" onclick="playerRequestXfer()"><i class="fa-solid fa-arrow-right-arrow-left"></i>Transfer</button></div>' :
+            '<p class="empty-card text-sm mb-3">Mode lihat saja (bangkrut).</p>') +
+        '<div class="space-y-2 mb-4">' + state.players.map(function (p) {
+            return '<div class="player-card" style="cursor:default"><div class="player-avatar" style="background:' + p.color + '">' +
+                escapeHtml(p.name.charAt(0).toUpperCase()) + '</div><div class="flex-1"><p class="font-extrabold">' +
+                '<span class="name-badge" style="background:' + p.color + ';color:' + textOnColor(p.color) + '">' + escapeHtml(p.name) + '</span></p>' +
+                '<p class="text-sm font-bold mt-1">' + formatMoney(p.balance) + '</p></div></div>';
+        }).join('') + '</div>';
+}
+
+function renderPlayerAssets() {
+    const el = document.getElementById('view-cash');
+    if (!el) return;
+    const me = sessionPlayer();
+    renderAssetCatalog(el, {
+        ownerId: me ? me.id : '__none__',
+        query: playerAssetSearchQuery,
+        searchId: 'playerAssetSearch',
+        oninput: 'playerAssetSearchQuery=this.value;renderPlayerAssets()',
+        placeholder: 'Cari A1, nama...',
+        emptyZero: 'Belum punya aset',
+        emptyNone: 'Tidak ada aset yang cocok'
+    });
+}
+
+function renderPlayerQueue() {
+    const el = document.getElementById('view-queue');
+    const mine = (state.requests || []).filter(function (r) { return appSession && r.playerId === appSession.playerId; }).slice().reverse();
+    let html = '<p class="section-label">Permintaan saya</p>';
+    if (!mine.length) html += '<p class="empty-card text-sm mb-3">Belum ada permintaan</p>';
+    else html += mine.map(function (r) {
+        const st = r.status === 'pending' ? 'Menunggu' : (r.status === 'approved' ? 'Disetujui' : 'Ditolak');
+        return '<div class="tx-item p-3 mb-2"><p class="text-xs font-bold">' + escapeHtml(reqDetail(r)) + '</p>' +
+            '<p class="text-[10px]" style="color:var(--muted)">' + st + (r.bankerNote ? (' · ' + escapeHtml(r.bankerNote)) : '') + '</p></div>';
+    }).join('');
+    html += '<p class="section-label">Riwayat permainan</p>' + txListHtml();
+    el.innerHTML = html;
+}
+function renderPlayerSettings() {
+    const el = document.getElementById('view-settings');
+    if (!el || !isPlayer()) return;
+    const me = sessionPlayer();
+    if (!me) {
+        el.innerHTML = '<p class="empty-card">Sesi tidak valid</p>' + btnHtml('btn-ghost', 'fa-right-from-bracket', 'Keluar', 'logoutSession()');
+        return;
+    }
+    const swatches = PLAYER_COLORS.map(function (c) {
+        return '<button type="button" class="color-swatch' + (me.color === c ? ' selected' : '') + '" style="background:' + c +
+            '" onclick="setPlayerColor(\'' + c + '\')" aria-label="Warna"></button>';
+    }).join('');
+    el.innerHTML = '<div class="settings-card space-y-3">' +
+        '<p class="text-xs font-bold" style="color:var(--muted)">Warna pion</p>' +
+        '<div class="color-swatch-row mb-2">' + swatches + '</div>' +
+        '<label class="text-xs font-bold" style="color:var(--muted)">Warna kustom</label>' +
+        '<input type="color" class="input-field" id="customPlayerColor" value="' + escapeHtml(me.color) + '" onchange="setPlayerColor(this.value)">' +
+        muteToggleHtml() +
+        btnHtml('btn-ghost', 'fa-right-from-bracket', 'Keluar', 'logoutSession()') +
+        '</div>';
+}
+function setPlayerColor(hex) {
+    const me = sessionPlayer();
+    if (!me || !hex) return;
+    me.color = hex;
+    saveState();
+    renderAll();
+}
+
+function playerRequestGo() { enqueueRequest('go', {}); }
+function playerRequestPay() {
+    openModal('<div class="text-xl font-extrabold mb-3 pr-10">Request bayar bank</div>' +
+        amountFieldHtml('payAmt', state.settings.incomeTax) +
+        '<select id="payReason" class="select-field mb-3">' +
+        '<option value="Income Tax">Income Tax (' + formatMoney(state.settings.incomeTax) + ')</option>' +
+        '<option value="Luxury Tax">Luxury Tax (' + formatMoney(state.settings.luxuryTax) + ')</option>' +
+        '<option value="Penjara">Keluar penjara ($50)</option>' +
+        '<option value="Kartu">Kartu</option>' +
+        '<option value="Lainnya">Lainnya</option></select>' +
+        btnHtml('btn-pay', 'fa-paper-plane', 'Kirim permintaan', 'submitPlayerPay()'));
+    document.getElementById('payReason').addEventListener('change', function () {
+        const m = { 'Income Tax': state.settings.incomeTax, 'Luxury Tax': state.settings.luxuryTax, 'Penjara': 50 };
+        if (m[this.value]) document.getElementById('payAmt').value = m[this.value];
+    });
+    document.getElementById('payAmt').value = state.settings.incomeTax;
+}
+function submitPlayerPay() {
+    enqueueRequest('pay_bank', { amount: parseFloat(document.getElementById('payAmt').value), reason: document.getElementById('payReason').value });
+}
+function playerRequestRecv() {
+    openModal('<div class="text-xl font-extrabold mb-3 pr-10">Request terima bank</div>' +
+        '<input id="recvAmt" class="input-field mb-3" type="number" placeholder="Jumlah" inputmode="numeric">' +
+        '<select id="recvReason" class="select-field mb-3"><option>Kartu</option><option>Gaji lain</option><option>Lainnya</option></select>' +
+        btnHtml('btn-recv', 'fa-paper-plane', 'Kirim permintaan', 'submitPlayerRecv()'));
+}
+function submitPlayerRecv() {
+    enqueueRequest('recv_bank', { amount: parseFloat(document.getElementById('recvAmt').value), reason: document.getElementById('recvReason').value });
+}
+function playerRequestXfer() {
+    pickToId = null;
+    openModal('<div class="text-xl font-extrabold mb-2 pr-10">Request transfer</div>' +
+        '<p class="text-xs font-bold mb-1" style="color:var(--muted)">Ke</p><div id="toGrid" class="player-grid mb-3">' + playerGridHtml(null, 'setPlayerTo', appSession.playerId) + '</div>' +
+        amountFieldHtml('trAmt', '') +
+        '<select id="trReason" class="select-field mb-3"><option>Sewa</option><option>Jual beli</option><option>Kartu</option><option>Lainnya</option></select>' +
+        btnHtml('btn-xfer', 'fa-paper-plane', 'Kirim permintaan', 'submitPlayerXfer()'));
+}
+function setPlayerTo(id) {
+    pickToId = pickToId === id ? null : id;
+    const g = document.getElementById('toGrid');
+    if (g) g.innerHTML = playerGridHtml(pickToId, 'setPlayerTo', appSession.playerId);
+}
+function submitPlayerXfer() {
+    if (!pickToId) { showToast('Pilih penerima', 'error'); return; }
+    enqueueRequest('transfer', { toPlayerId: pickToId, amount: parseFloat(document.getElementById('trAmt').value), reason: document.getElementById('trReason').value });
+}
+
+function playerRuleBtn(ok, reason, cls, icon, label, onclickOk) {
+    if (ok) return btnHtml(cls + ' mb-1.5', icon, label, onclickOk);
+    return '<button type="button" class="btn btn-ghost mb-1.5" onclick="showToast(' + JSON.stringify(reason) + ',\'error\')"><i class="fa-solid ' + icon + '"></i> ' + label + '</button>' +
+        '<p class="text-[10px] mb-2" style="color:#b45309">' + escapeHtml(reason) + '</p>';
+}
+
+function openPropSheetPlayer(id) {
+    const p = getProp(id);
+    if (!p) return;
+    const me = sessionPlayer();
+    const meta = GROUP_META[p.group];
+    const owner = p.ownerId ? getPlayer(p.ownerId) : null;
+    const tagBg = (meta || { color: '#1a2e24' }).color;
+    let rentText = '';
+    if (p.group === 'utility') rentText = 'Sewa: 4× atau 10× dadu';
+    else if (p.group === 'railroad') rentText = 'Sewa sekarang: ' + formatMoney(calcRailroadRent(p));
+    else rentText = 'Sewa sekarang: ' + formatMoney(calcStreetRent(p));
+    const refund = Math.floor(p.houseCost / 2);
+    const redeem = Math.round(p.mortgage * 1.1);
+
+    let actions = '<p class="text-sm mb-3">Pemilik: <b>' + escapeHtml(owner ? owner.name : 'Bank') + '</b></p>';
+    if (playerCanRequest()) {
+        if (!p.ownerId) {
+            actions += amountFieldHtml('buyPrice', p.price) +
+                btnHtml('btn-recv', 'fa-paper-plane', 'Request beli', 'submitPlayerBuy(\'' + id + '\')');
+        } else if (me && p.ownerId === me.id) {
+            if (!p.mortgaged) {
+                actions += btnHtml('btn-rent', 'fa-hand-holding-dollar', 'Tagih sewa', 'playerRequestCollectRent(\'' + id + '\')');
+            }
+            if (p.houseCost > 0) {
+                const h = canPlayerBuildHouse(id);
+                const ht = canPlayerBuildHotel(id);
+                const sl = canPlayerSellBuild(id);
+                actions += '<p class="section-label">Bangunan</p>';
+                actions += playerRuleBtn(h.ok, h.reason, 'btn-build', 'fa-house', 'Request rumah ' + formatMoney(p.houseCost), 'playerTryAsset(\'' + id + '\',\'house\')');
+                actions += playerRuleBtn(ht.ok, ht.reason, 'btn-hotel', 'fa-hotel', 'Request hotel ' + formatMoney(p.houseCost), 'playerTryAsset(\'' + id + '\',\'hotel\')');
+                actions += playerRuleBtn(sl.ok, sl.reason, 'btn-ghost', 'fa-arrow-down', 'Request jual 1 rumah ' + formatMoney(refund), 'playerTryAsset(\'' + id + '\',\'sell\')');
+            }
+            actions += '<p class="section-label">Hipotek</p>';
+            if (!p.mortgaged) {
+                const m = canPlayerMortgage(id);
+                actions += playerRuleBtn(m.ok, m.reason, 'btn-mortgage', 'fa-file-invoice-dollar', 'Request hipotek +' + formatMoney(p.mortgage), 'playerTryAsset(\'' + id + '\',\'mortgage\')');
+            } else {
+                const u = canPlayerUnmortgage(id);
+                actions += playerRuleBtn(u.ok, u.reason, 'btn-recv', 'fa-unlock', 'Request tebus ' + formatMoney(redeem), 'playerTryAsset(\'' + id + '\',\'unmortgage\')');
+            }
+        }
+    }
+    openModal('<div class="h-1.5 rounded-full mb-2" style="background:' + tagBg + '"></div>' +
+        '<div class="text-lg font-extrabold mb-0.5 pr-10 leading-tight"><span class="code-badge align-middle mr-1" style="background:' + tagBg + ';color:#fff">' + escapeHtml(propCode(p)) + '</span> ' + escapeHtml(p.name) + '</div>' +
+        '<p class="text-[11px] mb-2" style="color:var(--muted)">' + formatMoney(p.price) + ' · hipotek ' + formatMoney(p.mortgage) + ' · ' + rentText +
+        (p.hotel ? ' · Hotel' : (p.houses ? ' · ' + p.houses + ' rumah' : '')) + '</p>' + actions);
+}
+function playerTryAsset(propId, kind) {
+    let r = { ok: false, reason: 'Tidak valid' };
+    if (kind === 'house') r = canPlayerBuildHouse(propId);
+    else if (kind === 'hotel') r = canPlayerBuildHotel(propId);
+    else if (kind === 'sell') r = canPlayerSellBuild(propId);
+    else if (kind === 'mortgage') r = canPlayerMortgage(propId);
+    else if (kind === 'unmortgage') r = canPlayerUnmortgage(propId);
+    if (!r.ok) { showToast(r.reason, 'error'); return; }
+    if (kind === 'mortgage') enqueueRequest('mortgage', { propertyId: propId });
+    else if (kind === 'unmortgage') enqueueRequest('unmortgage', { propertyId: propId });
+    else enqueueRequest('build', { propertyId: propId, kind: kind });
+}
+function submitPlayerBuy(propId) {
+    enqueueRequest('buy', { propertyId: propId, amount: parseFloat(document.getElementById('buyPrice').value) });
+}
+function playerRequestCollectRent(propId) {
+    pickToId = null;
+    const p = getProp(propId);
+    if (!p) return;
+    const diceField = p.group === 'utility'
+        ? '<input id="diceValue" class="input-field mb-3" type="number" placeholder="Dadu 2–12" inputmode="numeric">'
+        : '';
+    openModal('<div class="text-xl font-extrabold mb-2 pr-10">Tagih sewa</div>' +
+        '<p class="text-sm mb-2">' + escapeHtml(p.name) + ' · ' +
+        (p.group === 'utility' ? '4× atau 10× dadu' : ('sewa ' + formatMoney(calcRent(p, 7)))) + '</p>' +
+        '<p class="text-xs font-bold mb-1" style="color:var(--muted)">Pemain yang mendarat</p>' +
+        '<div id="toGrid" class="player-grid mb-3">' + playerGridHtml(null, 'setCollectPayer', appSession.playerId) + '</div>' +
+        diceField +
+        btnHtml('btn-rent', 'fa-paper-plane', 'Kirim tagihan', 'submitPlayerCollectRent(\'' + propId + '\')'));
+}
+function setCollectPayer(id) {
+    pickToId = pickToId === id ? null : id;
+    const g = document.getElementById('toGrid');
+    if (g) g.innerHTML = playerGridHtml(pickToId, 'setCollectPayer', appSession.playerId);
+}
+function submitPlayerCollectRent(propId) {
+    if (!pickToId) { showToast('Pilih pemain yang mendarat', 'error'); return; }
+    const p = getProp(propId);
+    const payload = { propertyId: propId, payerId: pickToId };
+    if (p && p.group === 'utility') payload.dice = parseFloat((document.getElementById('diceValue') || {}).value);
+    enqueueRequest('rent', payload);
+}
+
+function hideRequestOverlay() {
+    requestGateOpen = false;
+    shownRequestId = null;
+    const box = document.getElementById('requestOverlay');
+    if (!box) return;
+    box.classList.add('hidden');
+    box.innerHTML = '';
+}
+function oldestPendingRequest() {
+    return (state.requests || []).filter(function (r) { return r.status === 'pending'; })
+        .sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); })[0] || null;
+}
+function syncBankerRequestOverlay() {
+    maybeShowDebtOverlay();
+    if (state.debtSettlement) {
+        hideRequestOverlay();
+        return;
+    }
+    if (!isServerMode() || isPlayer() || roleGateOpen || moneyFxCanClose) return;
+    if (shownRequestId) {
+        const cur = (state.requests || []).find(function (r) { return r.id === shownRequestId; });
+        if (!cur || cur.status !== 'pending') {
+            hideRequestOverlay();
+            showToast('Sudah diproses di perangkat lain', 'success');
+        }
+    }
+    maybeShowBankerRequestPopup();
+}
+function maybeShowBankerRequestPopup() {
+    if (state.debtSettlement) {
+        hideRequestOverlay();
+        return;
+    }
+    if (!isServerMode() || isPlayer() || roleGateOpen || moneyFxCanClose) return;
+    const req = oldestPendingRequest();
+    const box = document.getElementById('requestOverlay');
+    if (!box) return;
+    if (!req) {
+        hideRequestOverlay();
+        return;
+    }
+    if (requestGateOpen && shownRequestId === req.id) return;
+    const isNew = shownRequestId !== req.id;
+    requestGateOpen = true;
+    shownRequestId = req.id;
+    if (isNew && lastBankerSoundReqId !== req.id) {
+        lastBankerSoundReqId = req.id;
+        playNotifySound();
+    }
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="role-card">' + requestPopupHtml(req) +
+        '<div class="flex gap-2 mt-4">' +
+        '<button type="button" class="btn btn-recv" onclick="approveRequest(\'' + req.id + '\')">Setujui</button>' +
+        '<button type="button" class="btn btn-danger" onclick="rejectRequest(\'' + req.id + '\')">Tolak</button></div></div>';
+}
+function approveRequest(id) {
+    if (isPlayer()) return;
+    resolveRequest(id, true);
+}
+function rejectRequest(id) {
+    if (isPlayer()) return;
+    resolveRequest(id, false);
+}
+async function resolveRequest(id, approve) {
+    if (isPlayer()) return;
+    if (isServerMode()) {
+        try {
+            const okPull = await loadStateFromServer();
+            if (!okPull) {
+                showToast('Gagal sinkron data', 'error');
+                return;
+            }
+        } catch (e) {
+            showToast('Gagal sinkron data', 'error');
+            return;
+        }
+    }
+    const req = (state.requests || []).find(function (r) { return r.id === id; });
+    if (!req || req.status !== 'pending') {
+        hideRequestOverlay();
+        showToast('Sudah diproses di perangkat lain', 'success');
+        suppressSave = true;
+        if (!isPlayer()) {
+            renderPlayersView();
+            renderBoardView();
+            renderCashView();
+            renderSettingsView();
+        }
+        suppressSave = false;
+        maybeShowBankerRequestPopup();
+        return;
+    }
+    if (approve) {
+        const ok = applyApprovedRequest(req);
+        if (!ok) return;
+        req.status = 'approved';
+        req.resolvedAt = Date.now();
+        hideRequestOverlay();
+        renderAll();
+    } else {
+        req.status = 'rejected';
+        req.bankerNote = '';
+        req.resolvedAt = Date.now();
+        hideRequestOverlay();
+        renderAll();
+        showToast('Permintaan ditolak', 'success');
+    }
+}
+function applyApprovedRequest(req) {
+    const pl = req.payload || {};
+    if (req.type === 'go') {
+        const p = getPlayer(req.playerId);
+        if (!p) { showToast('Pemain tidak ada', 'error'); return false; }
+        const old = snapshotBalances();
+        p.balance += state.settings.goAmount;
+        pushTx({ type: 'go', from: 'bank', to: p.id, amount: state.settings.goAmount, reason: 'GO' });
+        finishMoney('bank', p.id, old, p.name + ' +' + formatMoney(state.settings.goAmount), state.settings.goAmount);
+        return true;
+    }
+    if (req.type === 'pay_bank') {
+        const p = getPlayer(req.playerId);
+        const amt = parseFloat(pl.amount);
+        if (!p || isNaN(amt) || amt <= 0) { showToast('Data bayar tidak valid', 'error'); return false; }
+        return applyPayBankDue(p, amt, pl.reason || 'Bayar bank');
+    }
+    if (req.type === 'recv_bank') {
+        const p = getPlayer(req.playerId);
+        const amt = parseFloat(pl.amount);
+        if (!p || isNaN(amt) || amt <= 0) { showToast('Data terima tidak valid', 'error'); return false; }
+        const old = snapshotBalances();
+        p.balance += amt;
+        pushTx({ type: 'recv-bank', from: 'bank', to: p.id, amount: amt, reason: pl.reason || 'Terima bank' });
+        finishMoney('bank', p.id, old, p.name + ' terima ' + formatMoney(amt), amt);
+        return true;
+    }
+    if (req.type === 'transfer') {
+        const a = getPlayer(req.playerId);
+        const b = getPlayer(pl.toPlayerId);
+        const amt = parseFloat(pl.amount);
+        if (!a || !b || isNaN(amt) || amt <= 0) { showToast('Transfer tidak valid', 'error'); return false; }
+        if (!canAfford(a, amt)) return false;
+        const old = snapshotBalances();
+        a.balance -= amt;
+        b.balance += amt;
+        pushTx({ type: 'p2p', from: a.id, to: b.id, amount: amt, reason: pl.reason || 'Transfer' });
+        finishMoney(a.id, b.id, old, a.name + ' → ' + b.name + ' ' + formatMoney(amt), amt);
+        return true;
+    }
+    if (req.type === 'buy') {
+        const p = getProp(pl.propertyId);
+        const buyer = getPlayer(req.playerId);
+        const price = parseFloat(pl.amount);
+        if (!p || p.ownerId) { showToast('Sudah dimiliki', 'error'); return false; }
+        if (!buyer || isNaN(price) || price < 0) return false;
+        if (!canAfford(buyer, price)) return false;
+        const old = snapshotBalances();
+        buyer.balance -= price;
+        p.ownerId = buyer.id;
+        pushTx({ type: 'buy', from: buyer.id, to: 'bank', propertyId: p.id, amount: price, reason: 'Beli ' + p.name });
+        finishMoney(buyer.id, 'bank', old, buyer.name + ' beli ' + p.name, price);
+        return true;
+    }
+    if (req.type === 'rent') {
+        const p = getProp(pl.propertyId);
+        let payer = getPlayer(pl.payerId);
+        if (!payer && req.playerId && p && req.playerId !== p.ownerId) payer = getPlayer(req.playerId);
+        if (!p || !p.ownerId || p.mortgaged || !payer) { showToast('Tidak bisa sewa', 'error'); return false; }
+        if (payer.id === p.ownerId) return false;
+        let dice = pl.dice;
+        if (p.group === 'utility') {
+            dice = parseFloat(dice);
+            if (isNaN(dice) || dice < 2 || dice > 12) { showToast('Dadu 2–12', 'error'); return false; }
+        }
+        const amount = calcRent(p, dice);
+        if (amount <= 0) return false;
+        const owner = getPlayer(p.ownerId);
+        return applyRentDue(payer, owner, amount, p.id);
+    }
+    if (req.type === 'build') {
+        if (pl.kind === 'hotel') buildHotel(pl.propertyId);
+        else if (pl.kind === 'sell') sellHouse(pl.propertyId);
+        else buildHouse(pl.propertyId);
+        return true;
+    }
+    if (req.type === 'mortgage') { mortgageProp(pl.propertyId); return true; }
+    if (req.type === 'unmortgage') { unmortgageProp(pl.propertyId); return true; }
+    showToast('Jenis permintaan tidak dikenal', 'error');
+    return false;
+}
+
+function showRoleModal() {
+    roleGateOpen = true;
+    const box = document.getElementById('roleOverlay');
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="role-card">' +
+        '<p class="text-xl font-extrabold mb-1">Siapa Anda?</p>' +
+        '<p class="text-sm mb-4" style="color:var(--muted)">Pilih peran di perangkat ini</p>' +
+        '<div class="flex gap-2 mb-3">' +
+        '<button type="button" class="btn btn-recv" onclick="chooseBanker()">Banker</button>' +
+        '<button type="button" class="btn btn-player-role" onclick="showPlayerJoin()">Pemain</button></div>' +
+        '<div id="playerJoinBox"></div></div>';
+}
+function hideRoleModal() {
+    roleGateOpen = false;
+    const box = document.getElementById('roleOverlay');
+    box.classList.add('hidden');
+    box.innerHTML = '';
+}
+function chooseBanker() {
+    writeSession({ role: 'banker' });
+    hideRoleModal();
+    currentView = 'players';
+    renderAll();
+}
+function showPlayerJoin() {
+    const box = document.getElementById('playerJoinBox');
+    if (!box) return;
+    box.innerHTML = '<input id="joinName" class="input-field mb-2" placeholder="Nama pemain" maxlength="24" autocomplete="off">' +
+        '<p id="joinErr" class="text-xs mb-2" style="color:#dc2626"></p>' +
+        btnHtml('btn-recv', 'fa-right-to-bracket', 'Masuk sebagai pemain', 'confirmPlayerJoin()');
+}
+function confirmPlayerJoin() {
+    const name = ((document.getElementById('joinName') || {}).value || '').trim();
+    const err = document.getElementById('joinErr');
+    if (!name) { if (err) err.textContent = 'Nama wajib'; return; }
+    const found = state.players.find(function (p) { return p.name.trim().toLowerCase() === name.toLowerCase(); });
+    if (!found) {
+        if (err) err.textContent = 'Nama belum terdaftar. Minta banker menambah pemain.';
+        return;
+    }
+    writeSession({ role: 'player', playerId: found.id, name: found.name });
+    hideRoleModal();
+    currentView = 'players';
+    renderAll();
+}
+function logoutSession() {
+    hideRequestOverlay();
+    hideDebtOverlay();
+    writeSession(null);
+    if (isServerMode()) showRoleModal();
+    else renderAll();
+}
+
+function modalIsOpen() {
+    return !!document.querySelector('#modalContainer .modal-overlay') || moneyFxCanClose;
+}
+function startPolling() {
+    if (!isServerMode() || pollTimer) return;
+    pollTimer = setInterval(async function () {
+        if (modalIsOpen() || roleGateOpen) return;
+        try {
+            const r = await fetch(SAVE_URL, { cache: 'no-store' });
+            if (!r.ok) return;
+            const data = await r.json();
+            if (!data) return;
+            const raw = JSON.stringify(data);
+            if (raw === lastRemoteJson) return;
+            lastRemoteJson = raw;
+            suppressSave = true;
+            applyLoaded(data);
+            applyChrome();
+            if (isPlayer()) {
+                renderPlayerHome();
+                renderPlayerAssets();
+                renderBoardView();
+                renderPlayerQueue();
+                renderPlayerSettings();
+            } else {
+                renderPlayersView();
+                renderBoardView();
+                renderCashView();
+                renderSettingsView();
+            }
+            suppressSave = false;
+            maybePlayRemoteFx();
+            maybeShowDebtOverlay();
+            syncBankerRequestOverlay();
+        } catch (e) {}
+    }, 2500);
+}
+
+async function bootApp() {
+    if (isServerMode()) await loadStateFromServer();
+    else loadStateFromLocal();
+    if (!Array.isArray(state.requests)) state.requests = [];
+    appSession = isServerMode() ? readSession() : { role: 'banker' };
+    if (isServerMode() && !appSession) showRoleModal();
+    else if (appSession && appSession.role === 'player' && !getPlayer(appSession.playerId)) {
+        writeSession(null);
+        showRoleModal();
+    }
+    applyChrome();
+    renderAll();
+    maybePlayRemoteFx();
+    startPolling();
+    document.addEventListener('pointerdown', function () { getAudioCtx(); }, { once: true });
+}
+
+document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (moneyFxCanClose) { closeMoneyFx(); return; }
+    const debt = document.getElementById('debtOverlay');
+    if (debt && !debt.classList.contains('hidden')) return;
+    closeModal();
+});
+bootApp();
+</script>
+</body>
+</html>
+
