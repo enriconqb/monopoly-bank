@@ -424,6 +424,8 @@
             font-size: 22px;
         }
         .req-amt { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; margin: 4px 0 12px; }
+        .go-summary-card { position: relative; padding-top: 18px; }
+        .go-summary-card .modal-close { width: 32px; height: 32px; top: 10px; right: 10px; border-radius: 10px; }
         .go-rank { width: 100%; text-align: left; border: 2px solid transparent; cursor: pointer; }
         .go-rank.winner { border-color: #c9a227; background: linear-gradient(180deg, #fff8e1, var(--paper)); }
         .go-winner-label { font-size: 28px; font-weight: 800; color: #c9a227; letter-spacing: .04em; line-height: 1.1; }
@@ -2204,10 +2206,9 @@ function gameOverOverlayHtml() {
             (r.bankrupt ? ' <span class="badge" style="background:#fee2e2;color:#dc2626">Bangkrut</span>' : '') + '</p>' +
             '<p class="text-sm font-bold">' + formatMoney(r.netWorth) + '</p>' + detail + '</div></button>';
     }).join('');
-    return '<div class="role-card" style="max-height:86vh;overflow:auto">' +
-        '<div class="flex items-start justify-between gap-2 mb-3">' +
-        '<p class="text-xl font-extrabold">Hasil permainan</p>' +
-        '<button type="button" class="btn btn-ghost" style="min-width:auto;padding:8px 12px" onclick="hideGameOverOverlay()"><i class="fa-solid fa-xmark"></i></button></div>' +
+    return '<div class="role-card go-summary-card" style="max-height:86vh;overflow:auto">' +
+        '<button type="button" onclick="hideGameOverOverlay()" class="modal-close" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>' +
+        '<p class="text-xl font-extrabold mb-3 pr-12">Hasil permainan</p>' +
         '<div class="space-y-2">' + rows + '</div></div>';
 }
 function toggleGoRank(i) {
