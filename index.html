@@ -637,7 +637,8 @@ const state = {
     lastFx: null,
     debtSettlement: null,
     gameOver: null,
-    epoch: 0
+    epoch: 0,
+    rev: 0
 };
 
 let currentView = 'players';
@@ -674,6 +675,9 @@ let shownTradeId = null;
 let shownTradeRound = -1;
 let gameOverDismissedEndedAt = 0;
 let gameOverExpandIdx = 0;
+let pollInFlight = false;
+let pollSeq = 0;
+let pollAppliedSeq = 0;
 
 function isServerMode() {
     return location.protocol === 'http:' || location.protocol === 'https:';
@@ -729,6 +733,10 @@ function writeSession(s) {
 }
 function applyLoaded(data) {
     if (!data || typeof data !== 'object') return;
+    if (remoteSnapshotStale(data)) {
+        if (Array.isArray(data.requests)) mergeRequests(data.requests);
+        return;
+    }
     if (Array.isArray(data.players)) state.players = data.players;
     if (Array.isArray(data.properties) && data.properties.length === catalog().length) {
         const fresh = catalog();
@@ -753,6 +761,24 @@ function applyLoaded(data) {
     state.debtSettlement = data.debtSettlement || null;
     state.gameOver = data.gameOver || null;
     if (typeof data.epoch === 'number') state.epoch = data.epoch;
+    if (typeof data.rev === 'number') state.rev = data.rev;
+}
+function remoteSnapshotStale(data) {
+    if (!data || typeof data !== 'object') return true;
+    const inEpoch = typeof data.epoch === 'number' ? data.epoch : 0;
+    const inRev = typeof data.rev === 'number' ? data.rev : 0;
+    const localEpoch = Number(state.epoch) || 0;
+    const localRev = Number(state.rev) || 0;
+    if (inEpoch < localEpoch) return true;
+    if (inEpoch === localEpoch && inRev < localRev) return true;
+    return false;
+}
+function canFullSave() {
+    if (!isServerMode()) return true;
+    return !!(appSession && appSession.role === 'banker');
+}
+function bumpRev() {
+    state.rev = (Number(state.rev) || 0) + 1;
 }
 function kickStalePlayerSession() {
     if (!isServerMode()) return false;
@@ -812,46 +838,42 @@ function snapshotStateJson() {
 }
 function saveState() {
     if (!Array.isArray(state.requests)) state.requests = [];
-    if (suppressSave || saveInFlight) return;
-    if (!isServerMode()) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
-        return;
-    }
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(function () {
-        lastRemoteJson = snapshotStateJson();
-        saveInFlight = true;
-        fetch(SAVE_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: lastRemoteJson
-        }).then(function () { saveInFlight = false; }, function () { saveInFlight = false; });
-    }, 280);
+    if (isServerMode()) return;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
 }
 async function flushSave() {
-    if (!Array.isArray(state.requests)) state.requests = [];
-    if (suppressSave) return;
-    if (!isServerMode()) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
-        return;
-    }
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    const body = snapshotStateJson();
-    lastRemoteJson = body;
-    saveInFlight = true;
+    saveState();
+}
+function ingestServerState(data) {
+    if (!data || !data.state) return data;
+    suppressSave = true;
+    applyLoaded(data.state);
+    lastRemoteJson = JSON.stringify(data.state);
+    suppressSave = false;
+    renderAll({ skipSave: true, skipBankerPopup: true });
+    playLastFxIfNew();
+    maybeShowDebtOverlay();
+    maybeShowGameOver();
+    return data;
+}
+async function postOp(body) {
+    if (!isServerMode()) return { ok: false, error: 'offline' };
     try {
         const res = await fetch(SAVE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: body
+            body: JSON.stringify(body)
         });
-        if (res.ok) {
-            const data = await res.json();
-            if (data && Array.isArray(data.requests)) mergeRequests(data.requests);
-        }
-    } catch (e) {}
-    saveInFlight = false;
+        const data = await res.json();
+        if (data && data.state) ingestServerState(data);
+        else if (data && Array.isArray(data.requests)) mergeRequests(data.requests);
+        return data || { ok: false };
+    } catch (e) {
+        return { ok: false, error: 'network' };
+    }
+}
+async function postCommand(kind, extra) {
+    return postOp(Object.assign({ _op: 'command', kind: kind }, extra || {}));
 }
 async function upsertRequestOnServer(req) {
     if (!req) return false;
@@ -867,7 +889,13 @@ async function upsertRequestOnServer(req) {
         });
         if (!res.ok) return false;
         const data = await res.json();
-        if (data && Array.isArray(data.requests)) mergeRequests(data.requests);
+        if (data && data.state) {
+            suppressSave = true;
+            applyLoaded(data.state);
+            lastRemoteJson = JSON.stringify(data.state);
+            suppressSave = false;
+            mergeRequests(data.state.requests || data.requests || []);
+        } else if (data && Array.isArray(data.requests)) mergeRequests(data.requests);
         if (data && data.duplicate) return 'duplicate';
         return !!(data && data.ok);
     } catch (e) {
@@ -1366,6 +1394,10 @@ function debtPayerOk(d) {
 function tryCompleteDebtSettlement() {
     const d = state.debtSettlement;
     if (!d) { hideDebtOverlay(); return; }
+    if (isServerMode()) {
+        postCommand('completeDebt', {});
+        return;
+    }
     const payer = getPlayer(d.payerId);
     if (!payer || !debtPayerOk(d)) {
         state.debtSettlement = null;
@@ -1564,7 +1596,7 @@ function gotoPlayersThen(fn) {
             gsap.set(v, { clearProps: 'opacity,y,transform' });
         });
     }
-    renderAll();
+    renderAll({ skipSave: true });
     requestAnimationFrame(function () { requestAnimationFrame(fn); });
 }
 
@@ -1781,11 +1813,16 @@ function markFxSeen(id) {
     try { if (id) localStorage.setItem(FX_SEEN_KEY, id); } catch (e) {}
 }
 function maybePlayRemoteFx() {
-    if (!isPlayer() || moneyFxCanClose) return;
+    playLastFxIfNew();
+}
+function playLastFxIfNew() {
+    if (moneyFxCanClose) return;
     const fx = state.lastFx;
     if (!fx || !fx.id || seenFxId() === fx.id) return;
-    const me = appSession && appSession.playerId;
-    if (!me || (fx.from !== me && fx.to !== me)) return;
+    if (isPlayer()) {
+        const me = appSession && appSession.playerId;
+        if (!me || (fx.from !== me && fx.to !== me)) return;
+    }
     markFxSeen(fx.id);
     playMoneyAnimation(fx);
 }
@@ -2112,23 +2149,15 @@ function saveSettingsFromForm() {
     const g = parseFloat(document.getElementById('setGo').value);
     if (!isNaN(s) && s >= 0) state.settings.startingCash = s;
     if (!isNaN(g) && g >= 0) state.settings.goAmount = g;
-    saveState();
+    if (isServerMode()) postCommand('settings', { startingCash: state.settings.startingCash, goAmount: state.settings.goAmount });
+    else saveState();
     showToast('Setelan disimpan', 'success');
-    renderAll();
+    if (!isServerMode()) renderAll();
 }
 
 async function resetGame() {
     if (isPlayer()) return;
     if (!confirm('Hapus semua pemain, aset, dan riwayat?')) return;
-    state.players = [];
-    state.properties = catalog();
-    state.transactions = [];
-    state.requests = [];
-    state.lastFx = null;
-    state.debtSettlement = null;
-    state.gameOver = null;
-    state.colorIndex = 0;
-    state.epoch = (Number(state.epoch) || 0) + 1;
     gameOverDismissedEndedAt = 0;
     gameOverExpandIdx = 0;
     hideGameOverOverlay(true);
@@ -2136,8 +2165,21 @@ async function resetGame() {
     hideTradeOverlay();
     hideDebtOverlay();
     closeModal();
-    await flushSave();
-    renderAll({ skipSave: true });
+    if (isServerMode()) {
+        await postCommand('reset', {});
+    } else {
+        state.players = [];
+        state.properties = catalog();
+        state.transactions = [];
+        state.requests = [];
+        state.lastFx = null;
+        state.debtSettlement = null;
+        state.gameOver = null;
+        state.colorIndex = 0;
+        state.epoch = (Number(state.epoch) || 0) + 1;
+        saveState();
+        renderAll({ skipSave: true });
+    }
     maybeShowGameOver();
     showToast('Game direset', 'success');
 }
@@ -2184,13 +2226,16 @@ function confirmEndGame() {
         return;
     }
     if (!confirm('Akhiri permainan dan hitung peringkat? Permintaan baru akan ditutup.')) return;
-    state.gameOver = buildGameOverSnapshot();
     gameOverDismissedEndedAt = 0;
     gameOverExpandIdx = 0;
     hideRequestOverlay();
     hideTradeOverlay();
+    if (isServerMode()) {
+        postCommand('endGame', {}).then(function () { showGameOverOverlay(true); });
+        return;
+    }
+    state.gameOver = buildGameOverSnapshot();
     saveState();
-    flushSave();
     renderAll({ skipSave: true });
     showGameOverOverlay(true);
 }
@@ -2284,6 +2329,12 @@ function confirmAddPlayer() {
     const bal = parseFloat(document.getElementById('newPlayerBalance').value);
     if (!name) { showToast('Nama wajib', 'error'); return; }
     if (isNaN(bal) || bal < 0) { showToast('Saldo tidak valid', 'error'); return; }
+    if (isServerMode()) {
+        closeModal();
+        postCommand('addPlayer', { name: name, balance: bal });
+        showToast(name + ' ditambahkan', 'success');
+        return;
+    }
     state.players.push({ id: generateId(), name: name, color: nextColor(), balance: bal, bankrupt: false });
     const added = state.players[state.players.length - 1];
     if (!getPlayer(getWatchPlayerId())) setWatchPlayerId(added.id);
@@ -2317,6 +2368,11 @@ function openPlayerSheet(id) {
 function toggleBankrupt(id) {
     const p = getPlayer(id);
     if (!p) return;
+    if (isServerMode()) {
+        closeModal();
+        postCommand('bankrupt', { playerId: id });
+        return;
+    }
     p.bankrupt = !p.bankrupt;
     if (p.bankrupt) {
         releasePlayerAssetsToBank(id);
@@ -2330,6 +2386,12 @@ function toggleBankrupt(id) {
 function deletePlayer(id) {
     const p = getPlayer(id);
     if (!p || !confirm('Hapus ' + p.name + '? Aset kembali ke bank.')) return;
+    if (isServerMode()) {
+        closeModal();
+        postCommand('deletePlayer', { playerId: id });
+        showToast('Pemain dihapus', 'success');
+        return;
+    }
     state.properties.forEach(pr => {
         if (pr.ownerId === id) { pr.ownerId = null; pr.houses = 0; pr.hotel = false; pr.mortgaged = false; }
     });
@@ -2413,6 +2475,11 @@ function buyProperty(propId) {
     if (!buyer) { showToast('Pilih pembeli', 'error'); return; }
     if (isNaN(price) || price < 0) { showToast('Harga tidak valid', 'error'); return; }
     if (!canAfford(buyer, price)) return;
+    if (isServerMode()) {
+        closeModal();
+        postCommand('buy', { playerId: buyer.id, propertyId: p.id, amount: price });
+        return;
+    }
     const old = snapshotBalances();
     buyer.balance -= price;
     p.ownerId = buyer.id;
@@ -2434,6 +2501,11 @@ function collectRent(propId) {
     const amount = calcRent(p, dice);
     if (amount <= 0) { showToast('Sewa 0', 'error'); return; }
     const owner = getPlayer(p.ownerId);
+    if (isServerMode()) {
+        closeModal();
+        postCommand('rent', { propertyId: p.id, payerId: payer.id, dice: dice });
+        return;
+    }
     applyRentDue(payer, owner, amount, p.id);
 }
 
@@ -2503,6 +2575,7 @@ function buildHouse(propId) {
     if (!evenBuildOk(p, p.houses + 1, false)) { showToast('Even-build: rata dulu', 'error'); return; }
     if (houseStock().houses >= 32) { showToast('Stok rumah habis', 'error'); return; }
     if (!canAfford(owner, p.houseCost)) return;
+    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, kind: 'house' }); return; }
     const old = snapshotBalances();
     owner.balance -= p.houseCost;
     p.houses += 1;
@@ -2518,6 +2591,7 @@ function buildHotel(propId) {
     if (!evenBuildOk(p, 0, true)) { showToast('Even-build hotel', 'error'); return; }
     if (houseStock().hotels >= 12) { showToast('Stok hotel habis', 'error'); return; }
     if (!canAfford(owner, p.houseCost)) return;
+    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, kind: 'hotel' }); return; }
     const old = snapshotBalances();
     owner.balance -= p.houseCost;
     p.houses = 0;
@@ -2531,6 +2605,7 @@ function sellHouse(propId) {
     const owner = p && getPlayer(p.ownerId);
     if (!p || !owner) return;
     const refund = Math.floor(p.houseCost / 2);
+    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, kind: 'sell' }); return; }
     const old = snapshotBalances();
     if (p.hotel) {
         if (!evenBuildOk(p, 4, false)) { showToast('Even-sell dulu set lain', 'error'); return; }
@@ -2554,6 +2629,7 @@ function mortgageProp(propId) {
     if (p.houses > 0 || p.hotel || buildingsOnGroup(p.group)) {
         showToast('Jual semua rumah di set dulu', 'error'); return;
     }
+    if (isServerMode()) { closeModal(); postCommand('mortgage', { propertyId: propId }); return; }
     const old = snapshotBalances();
     p.mortgaged = true;
     owner.balance += p.mortgage;
@@ -2567,6 +2643,7 @@ function unmortgageProp(propId) {
     if (!p || !owner || !p.mortgaged) return;
     const cost = Math.round(p.mortgage * 1.1);
     if (!canAfford(owner, cost)) return;
+    if (isServerMode()) { closeModal(); postCommand('unmortgage', { propertyId: propId }); return; }
     const old = snapshotBalances();
     owner.balance -= cost;
     p.mortgaged = false;
@@ -2580,6 +2657,7 @@ function transferProperty(propId) {
     if (!p || !to) { showToast('Pilih penerima', 'error'); return; }
     if (p.ownerId === to.id) { showToast('Sudah milik pemain itu', 'error'); return; }
     if (p.houses > 0 || p.hotel) { showToast('Jual bangunan dulu', 'error'); return; }
+    if (isServerMode()) { closeModal(); postCommand('transferProp', { propertyId: propId, toPlayerId: to.id }); showToast('Aset dipindah', 'success'); return; }
     p.ownerId = to.id;
     pushTx({ type: 'deed', from: 'trade', to: to.id, propertyId: p.id, amount: 0, reason: 'Alih ' + p.name + ' ke ' + to.name });
     closeModal();
@@ -2590,6 +2668,7 @@ function transferProperty(propId) {
 function returnToBank(propId) {
     const p = getProp(propId);
     if (!p || !confirm('Kembalikan ke bank?')) return;
+    if (isServerMode()) { closeModal(); postCommand('returnBank', { propertyId: propId }); showToast('Kembali ke bank', 'success'); return; }
     p.ownerId = null; p.houses = 0; p.hotel = false; p.mortgaged = false;
     pushTx({ type: 'return', from: 'player', to: 'bank', propertyId: p.id, amount: 0, reason: 'Kembali ' + p.name });
     closeModal();
@@ -2612,6 +2691,7 @@ function setGoPick(id) {
 function confirmGo() {
     const p = getPlayer(pickPlayerId);
     if (!p) { showToast('Pilih pemain', 'error'); return; }
+    if (isServerMode()) { closeModal(); postCommand('go', { playerId: p.id }); return; }
     const old = snapshotBalances();
     p.balance += state.settings.goAmount;
     pushTx({ type: 'go', from: 'bank', to: p.id, amount: state.settings.goAmount, reason: 'GO' });
@@ -2648,6 +2728,7 @@ function confirmPayBank() {
     const reason = document.getElementById('payReason').value;
     if (!p) { showToast('Pilih pemain', 'error'); return; }
     if (isNaN(amt) || amt <= 0) { showToast('Jumlah salah', 'error'); return; }
+    if (isServerMode()) { closeModal(); postCommand('payBank', { playerId: p.id, amount: amt, reason: reason }); return; }
     applyPayBankDue(p, amt, reason);
 }
 
@@ -2672,6 +2753,7 @@ function confirmReceive() {
     const reason = document.getElementById('recvReason').value;
     if (!p) { showToast('Pilih pemain', 'error'); return; }
     if (isNaN(amt) || amt <= 0) { showToast('Jumlah salah', 'error'); return; }
+    if (isServerMode()) { closeModal(); postCommand('recvBank', { playerId: p.id, amount: amt, reason: reason }); return; }
     const old = snapshotBalances();
     p.balance += amt;
     pushTx({ type: 'recv-bank', from: 'bank', to: p.id, amount: amt, reason: reason });
@@ -2708,6 +2790,7 @@ function confirmTransfer() {
     if (!a || !b) { showToast('Pilih dari dan ke', 'error'); return; }
     if (isNaN(amt) || amt <= 0) { showToast('Jumlah salah', 'error'); return; }
     if (!canAfford(a, amt)) return;
+    if (isServerMode()) { closeModal(); postCommand('transfer', { fromId: a.id, toId: b.id, amount: amt, reason: reason }); return; }
     const old = snapshotBalances();
     a.balance -= amt;
     b.balance += amt;
@@ -3513,6 +3596,10 @@ function renderPlayerSettings() {
 function setPlayerColor(hex) {
     const me = sessionPlayer();
     if (!me || !hex) return;
+    if (isServerMode()) {
+        postCommand('playerColor', { playerId: me.id, color: hex });
+        return;
+    }
     me.color = hex;
     saveState();
     renderAll();
@@ -3738,35 +3825,35 @@ function rejectRequest(id) {
 async function resolveRequest(id, approve) {
     if (isPlayer() || resolvingRequestId) return;
     resolvingRequestId = id;
-    const req = (state.requests || []).find(function (r) { return r.id === id; });
-    if (!req || req.status !== 'pending') {
-        hideRequestOverlay();
-        showToast('Sudah diproses di perangkat lain', 'success');
-        await mergeRemoteRequestsOnly();
-        bankerPopupHoldUntil = Date.now() + 450;
+    hideRequestOverlay();
+    bankerPopupHoldUntil = Date.now() + 450;
+    if (!isServerMode()) {
+        const req = (state.requests || []).find(function (r) { return r.id === id; });
+        if (!req || req.status !== 'pending') {
+            showToast('Sudah diproses di perangkat lain', 'success');
+            resolvingRequestId = null;
+            setTimeout(function () { maybeShowBankerRequestPopup(); }, 450);
+            return;
+        }
+        if (approve) {
+            const ok = applyApprovedRequest(req);
+            if (!ok) { resolvingRequestId = null; return; }
+            req.status = 'approved';
+            req.resolvedAt = Date.now();
+        } else {
+            req.status = 'rejected';
+            req.resolvedAt = Date.now();
+            showToast('Permintaan ditolak', 'success');
+        }
+        renderAll({ skipSave: true, skipBankerPopup: true });
+        saveState();
         resolvingRequestId = null;
         setTimeout(function () { maybeShowBankerRequestPopup(); }, 450);
         return;
     }
-    if (approve) {
-        const ok = applyApprovedRequest(req);
-        if (!ok) {
-            resolvingRequestId = null;
-            return;
-        }
-        req.status = 'approved';
-        req.resolvedAt = Date.now();
-    } else {
-        req.status = 'rejected';
-        req.bankerNote = '';
-        req.resolvedAt = Date.now();
-        showToast('Permintaan ditolak', 'success');
-    }
-    hideRequestOverlay();
-    bankerPopupHoldUntil = Date.now() + 450;
-    renderAll({ skipSave: true, skipBankerPopup: true });
-    await mergeRemoteRequestsOnly();
-    await flushSave();
+    const data = await postOp({ _op: approve ? 'commitRequest' : 'rejectRequest', id: id });
+    if (!data || !data.ok) showToast((data && data.error) || 'Gagal memproses', 'error');
+    else if (!approve) showToast('Permintaan ditolak', 'success');
     resolvingRequestId = null;
     setTimeout(function () { maybeShowBankerRequestPopup(); }, 450);
 }
@@ -3931,23 +4018,29 @@ function modalIsOpen() {
     return !!document.querySelector('#modalContainer .modal-overlay') || moneyFxCanClose;
 }
 function pollBusy() {
-    if (isPlayer() && !resolvingRequestId && !saveInFlight) return false;
-    return modalIsOpen() || resolvingRequestId || saveInFlight;
+    return pollInFlight || saveInFlight || resolvingRequestId || moneyFxCanClose || modalIsOpen();
 }
 function startPolling() {
     if (!isServerMode() || pollTimer) return;
     pollTimer = setInterval(async function () {
         if (pollBusy()) return;
+        pollInFlight = true;
+        const seq = ++pollSeq;
         try {
             const r = await fetch(SAVE_URL, { cache: 'no-store' });
             if (!r.ok) return;
             const data = await r.json();
             if (!data) return;
+            if (seq < pollAppliedSeq) return;
             const raw = JSON.stringify(data);
-            if (raw === lastRemoteJson) return;
-            lastRemoteJson = raw;
+            if (raw === lastRemoteJson) {
+                pollAppliedSeq = seq;
+                return;
+            }
             suppressSave = true;
             applyLoaded(data);
+            pollAppliedSeq = seq;
+            lastRemoteJson = raw;
             const kicked = kickStalePlayerSession();
             if (kicked || roleGateOpen) {
                 suppressSave = false;
@@ -3974,6 +4067,7 @@ function startPolling() {
             maybeShowTradeOverlay();
             maybeShowGameOver();
         } catch (e) {}
+        finally { pollInFlight = false; }
     }, 800);
 }
 

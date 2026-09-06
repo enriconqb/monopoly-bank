@@ -88,6 +88,13 @@ function mb_epoch($data) {
     return intval($data['epoch']);
 }
 
+function mb_rev($data) {
+    if (!is_array($data) || !isset($data['rev'])) {
+        return 0;
+    }
+    return intval($data['rev']);
+}
+
 function mb_payload_key($payload) {
     if (!is_array($payload)) {
         return '';
@@ -148,6 +155,8 @@ function mb_write_state($fp, $data) {
     return fwrite($fp, $json) !== false;
 }
 
+require_once __DIR__ . DIRECTORY_SEPARATOR . 'game_apply.php';
+
 $method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
 
 if ($method === 'GET') {
@@ -190,19 +199,11 @@ if ($method === 'POST') {
         exit;
     }
 
-    $current = mb_read_state($fp);
+    $current = mb_norm_state(mb_read_state($fp));
     $oldReqs = (isset($current['requests']) && is_array($current['requests'])) ? $current['requests'] : array();
-    $curEpoch = mb_epoch($current);
-    $inEpoch = mb_epoch($incoming);
+    $op = isset($incoming['_op']) ? $incoming['_op'] : '';
 
-    if ($inEpoch < $curEpoch) {
-        flock($fp, LOCK_UN);
-        fclose($fp);
-        echo json_encode(array('ok' => false, 'stale' => true, 'epoch' => $curEpoch, 'requests' => $oldReqs));
-        exit;
-    }
-
-    if (isset($incoming['_op']) && $incoming['_op'] === 'upsertRequest' && isset($incoming['request']) && is_array($incoming['request'])) {
+    if ($op === 'upsertRequest' && isset($incoming['request']) && is_array($incoming['request'])) {
         $req = $incoming['request'];
         if (!isset($req['id'])) {
             flock($fp, LOCK_UN);
@@ -211,13 +212,10 @@ if ($method === 'POST') {
             echo json_encode(array('ok' => false, 'error' => 'request id required'));
             exit;
         }
-        if (!is_array($current) || !$current) {
-            $current = array('players' => array(), 'properties' => array(), 'transactions' => array(), 'requests' => array());
-        }
         if (mb_is_duplicate_request($oldReqs, $req)) {
             flock($fp, LOCK_UN);
             fclose($fp);
-            echo json_encode(array('ok' => false, 'duplicate' => true, 'requests' => $oldReqs));
+            echo json_encode(array('ok' => false, 'duplicate' => true, 'requests' => $oldReqs, 'state' => $current));
             exit;
         }
         $current['requests'] = mb_merge_requests($oldReqs, array($req));
@@ -229,23 +227,75 @@ if ($method === 'POST') {
             echo json_encode(array('ok' => false, 'error' => 'write failed'));
             exit;
         }
-        echo json_encode(array('ok' => true, 'requests' => $current['requests']));
+        echo json_encode(array('ok' => true, 'requests' => $current['requests'], 'state' => $current));
         exit;
     }
 
-    unset($incoming['_op']);
-    unset($incoming['request']);
-    $newReqs = (isset($incoming['requests']) && is_array($incoming['requests'])) ? $incoming['requests'] : array();
-    $incoming['requests'] = mb_merge_requests($oldReqs, $newReqs);
-    $ok = mb_write_state($fp, $incoming);
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    if (!$ok) {
-        http_response_code(500);
-        echo json_encode(array('ok' => false, 'error' => 'write failed'));
+    if ($op === 'commitRequest' || $op === 'rejectRequest') {
+        $id = isset($incoming['id']) ? $incoming['id'] : '';
+        $found = null;
+        $idx = -1;
+        foreach ($current['requests'] as $i => $r) {
+            if (isset($r['id']) && $r['id'] === $id) {
+                $found = $r;
+                $idx = $i;
+                break;
+            }
+        }
+        if ($idx < 0 || !$found || (isset($found['status']) && $found['status'] !== 'pending')) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            echo json_encode(array('ok' => false, 'conflict' => true, 'error' => 'Sudah diproses', 'state' => $current));
+            exit;
+        }
+        if ($op === 'rejectRequest') {
+            $current['requests'][$idx]['status'] = 'rejected';
+            $current['requests'][$idx]['resolvedAt'] = mb_now();
+            mb_bump($current);
+            $ok = mb_write_state($fp, $current);
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            echo json_encode(array('ok' => $ok, 'state' => $current));
+            exit;
+        }
+        $applied = mb_apply_request($current, $found);
+        if (empty($applied['ok'])) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            echo json_encode(array('ok' => false, 'conflict' => true, 'error' => isset($applied['error']) ? $applied['error'] : 'Gagal', 'state' => $current));
+            exit;
+        }
+        $current['requests'][$idx]['status'] = 'approved';
+        $current['requests'][$idx]['resolvedAt'] = mb_now();
+        mb_bump($current);
+        $ok = mb_write_state($fp, $current);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        echo json_encode(array('ok' => $ok, 'state' => $current));
         exit;
     }
-    echo json_encode(array('ok' => true, 'requests' => $incoming['requests']));
+
+    if ($op === 'command') {
+        $kind = isset($incoming['kind']) ? $incoming['kind'] : '';
+        $applied = mb_command($current, $kind, $incoming);
+        if (empty($applied['ok'])) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            echo json_encode(array('ok' => false, 'conflict' => true, 'error' => isset($applied['error']) ? $applied['error'] : 'Gagal', 'state' => $current));
+            exit;
+        }
+        mb_bump($current);
+        $ok = mb_write_state($fp, $current);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        echo json_encode(array('ok' => $ok, 'state' => $current));
+        exit;
+    }
+
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    http_response_code(400);
+    echo json_encode(array('ok' => false, 'error' => 'unknown op'));
     exit;
 }
 
