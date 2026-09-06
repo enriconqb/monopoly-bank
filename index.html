@@ -3463,13 +3463,32 @@ function showPlayerJoin() {
         '<p id="joinErr" class="text-xs mb-2" style="color:#dc2626"></p>' +
         btnHtml('btn-recv', 'fa-right-to-bracket', 'Masuk sebagai pemain', 'confirmPlayerJoin()');
 }
-function confirmPlayerJoin() {
-    const name = ((document.getElementById('joinName') || {}).value || '').trim();
+async function confirmPlayerJoin() {
+    const nameEl = document.getElementById('joinName');
+    const name = ((nameEl || {}).value || '').trim();
     const err = document.getElementById('joinErr');
     if (!name) { if (err) err.textContent = 'Nama wajib'; return; }
+    const btn = document.querySelector('#playerJoinBox button');
+    if (btn) { btn.disabled = true; btn.textContent = 'Mengecek nama…'; }
+    if (err) err.textContent = '';
+    if (isServerMode()) {
+        try {
+            const ok = await loadStateFromServer();
+            if (!ok) {
+                if (err) err.textContent = 'Gagal sinkron data. Coba lagi.';
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Masuk sebagai pemain'; }
+                return;
+            }
+        } catch (e) {
+            if (err) err.textContent = 'Gagal sinkron data. Coba lagi.';
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Masuk sebagai pemain'; }
+            return;
+        }
+    }
     const found = state.players.find(function (p) { return p.name.trim().toLowerCase() === name.toLowerCase(); });
     if (!found) {
         if (err) err.textContent = 'Nama belum terdaftar. Minta banker menambah pemain.';
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Masuk sebagai pemain'; }
         return;
     }
     writeSession({ role: 'player', playerId: found.id, name: found.name });
@@ -3490,7 +3509,7 @@ function modalIsOpen() {
     return !!document.querySelector('#modalContainer .modal-overlay') || moneyFxCanClose;
 }
 function pollBusy() {
-    return modalIsOpen() || roleGateOpen || resolvingRequestId || saveInFlight;
+    return modalIsOpen() || resolvingRequestId || saveInFlight;
 }
 function startPolling() {
     if (!isServerMode() || pollTimer) return;
@@ -3506,6 +3525,10 @@ function startPolling() {
             lastRemoteJson = raw;
             suppressSave = true;
             applyLoaded(data);
+            if (roleGateOpen) {
+                suppressSave = false;
+                return;
+            }
             applyChrome();
             if (isPlayer()) {
                 renderPlayerHome();
