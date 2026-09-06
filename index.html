@@ -636,7 +636,8 @@ const state = {
     requests: [],
     lastFx: null,
     debtSettlement: null,
-    gameOver: null
+    gameOver: null,
+    epoch: 0
 };
 
 let currentView = 'players';
@@ -751,6 +752,21 @@ function applyLoaded(data) {
     state.lastFx = data.lastFx || null;
     state.debtSettlement = data.debtSettlement || null;
     state.gameOver = data.gameOver || null;
+    if (typeof data.epoch === 'number') state.epoch = data.epoch;
+}
+function kickStalePlayerSession() {
+    if (!isServerMode()) return false;
+    if (!appSession || appSession.role !== 'player') return false;
+    if (getPlayer(appSession.playerId)) return false;
+    hideGameOverOverlay(true);
+    hideRequestOverlay();
+    hideTradeOverlay();
+    hideDebtOverlay();
+    closeModal();
+    writeSession(null);
+    showRoleModal();
+    updateSummaryFab();
+    return true;
 }
 function requestProgress(r) {
     if (!r) return 0;
@@ -847,7 +863,7 @@ async function upsertRequestOnServer(req) {
         const res = await fetch(SAVE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ _op: 'upsertRequest', request: req })
+            body: JSON.stringify({ _op: 'upsertRequest', request: req, epoch: Number(state.epoch) || 0 })
         });
         if (!res.ok) return false;
         const data = await res.json();
@@ -2101,7 +2117,7 @@ function saveSettingsFromForm() {
     renderAll();
 }
 
-function resetGame() {
+async function resetGame() {
     if (isPlayer()) return;
     if (!confirm('Hapus semua pemain, aset, dan riwayat?')) return;
     state.players = [];
@@ -2112,11 +2128,17 @@ function resetGame() {
     state.debtSettlement = null;
     state.gameOver = null;
     state.colorIndex = 0;
+    state.epoch = (Number(state.epoch) || 0) + 1;
     gameOverDismissedEndedAt = 0;
     gameOverExpandIdx = 0;
     hideGameOverOverlay(true);
-    saveState();
-    renderAll();
+    hideRequestOverlay();
+    hideTradeOverlay();
+    hideDebtOverlay();
+    closeModal();
+    await flushSave();
+    renderAll({ skipSave: true });
+    maybeShowGameOver();
     showToast('Game direset', 'success');
 }
 
@@ -3896,6 +3918,7 @@ async function confirmPlayerJoin() {
     renderAll();
 }
 function logoutSession() {
+    hideGameOverOverlay(true);
     hideRequestOverlay();
     hideTradeOverlay();
     hideDebtOverlay();
@@ -3908,6 +3931,7 @@ function modalIsOpen() {
     return !!document.querySelector('#modalContainer .modal-overlay') || moneyFxCanClose;
 }
 function pollBusy() {
+    if (isPlayer() && !resolvingRequestId && !saveInFlight) return false;
     return modalIsOpen() || resolvingRequestId || saveInFlight;
 }
 function startPolling() {
@@ -3924,8 +3948,10 @@ function startPolling() {
             lastRemoteJson = raw;
             suppressSave = true;
             applyLoaded(data);
-            if (roleGateOpen) {
+            const kicked = kickStalePlayerSession();
+            if (kicked || roleGateOpen) {
                 suppressSave = false;
+                maybeShowGameOver();
                 return;
             }
             applyChrome();
@@ -3957,9 +3983,12 @@ async function bootApp() {
     if (!Array.isArray(state.requests)) state.requests = [];
     appSession = isServerMode() ? readSession() : { role: 'banker' };
     if (isServerMode() && !appSession) showRoleModal();
-    else if (appSession && appSession.role === 'player' && !getPlayer(appSession.playerId)) {
-        writeSession(null);
-        showRoleModal();
+    else kickStalePlayerSession();
+    if (roleGateOpen) {
+        maybeShowGameOver();
+        startPolling();
+        document.addEventListener('pointerdown', function () { getAudioCtx(); }, { once: true });
+        return;
     }
     applyChrome();
     renderAll();

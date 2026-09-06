@@ -81,6 +81,13 @@ function mb_read_state($fp) {
     return is_array($data) ? $data : array();
 }
 
+function mb_epoch($data) {
+    if (!is_array($data) || !isset($data['epoch'])) {
+        return 0;
+    }
+    return intval($data['epoch']);
+}
+
 function mb_payload_key($payload) {
     if (!is_array($payload)) {
         return '';
@@ -185,6 +192,15 @@ if ($method === 'POST') {
 
     $current = mb_read_state($fp);
     $oldReqs = (isset($current['requests']) && is_array($current['requests'])) ? $current['requests'] : array();
+    $curEpoch = mb_epoch($current);
+    $inEpoch = mb_epoch($incoming);
+
+    if ($inEpoch < $curEpoch) {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        echo json_encode(array('ok' => false, 'stale' => true, 'epoch' => $curEpoch, 'requests' => $oldReqs));
+        exit;
+    }
 
     if (isset($incoming['_op']) && $incoming['_op'] === 'upsertRequest' && isset($incoming['request']) && is_array($incoming['request'])) {
         $req = $incoming['request'];
