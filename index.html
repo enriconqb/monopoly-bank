@@ -324,8 +324,9 @@
         }
         #moneyFxLayer.open {
             display: flex; align-items: stretch; justify-content: center;
+            pointer-events: auto;
+            touch-action: none;
         }
-        #moneyFxLayer.ready { pointer-events: auto; }
         .fx-screen {
             width: 100%; min-height: 100%;
             background: rgba(10, 42, 32, 0.92);
@@ -1623,6 +1624,7 @@ function closeMoneyFx() {
         layer.classList.remove('open', 'ready');
         layer.innerHTML = '';
         layer.onclick = null;
+        layer.onpointerdown = null;
     }
     tryCompleteDebtSettlement();
     maybeShowBankerRequestPopup();
@@ -1772,7 +1774,15 @@ function playMoneyAnimation(opts) {
             '<div class="fx-hint" id="fxHint"></div></div>' +
             fxPartyHtml(to, oldBalances, 'to') +
             '</div>';
-        layer.onclick = function () { closeMoneyFx(); };
+        function swallowFxTap(e) {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            closeMoneyFx();
+        }
+        layer.onpointerdown = swallowFxTap;
+        layer.onclick = swallowFxTap;
 
         const fromP = from === 'bank' ? null : getPlayer(from);
         const toP = to === 'bank' ? null : getPlayer(to);
