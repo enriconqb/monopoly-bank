@@ -81,6 +81,54 @@ function mb_read_state($fp) {
     return is_array($data) ? $data : array();
 }
 
+function mb_payload_key($payload) {
+    if (!is_array($payload)) {
+        return '';
+    }
+    return json_encode($payload);
+}
+
+function mb_is_duplicate_request($list, $req) {
+    $id = isset($req['id']) ? $req['id'] : '';
+    $pid = isset($req['playerId']) ? strval($req['playerId']) : '';
+    $type = isset($req['type']) ? $req['type'] : '';
+    $key = mb_payload_key(isset($req['payload']) && is_array($req['payload']) ? $req['payload'] : array());
+    $now = isset($req['createdAt']) ? intval($req['createdAt']) : 0;
+    if ($now <= 0) {
+        $now = (int) round(microtime(true) * 1000);
+    }
+    if (!is_array($list)) {
+        return false;
+    }
+    foreach ($list as $r) {
+        if (!is_array($r) || !isset($r['id'])) {
+            continue;
+        }
+        if ($r['id'] === $id) {
+            continue;
+        }
+        if (!isset($r['playerId']) || strval($r['playerId']) !== $pid) {
+            continue;
+        }
+        if (!isset($r['type']) || $r['type'] !== $type) {
+            continue;
+        }
+        $st = isset($r['status']) ? $r['status'] : '';
+        if ($st !== 'pending' && $st !== 'negotiating') {
+            continue;
+        }
+        $created = isset($r['createdAt']) ? intval($r['createdAt']) : 0;
+        if ($now - $created > 5000) {
+            continue;
+        }
+        $okey = mb_payload_key(isset($r['payload']) && is_array($r['payload']) ? $r['payload'] : array());
+        if ($okey === $key) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function mb_write_state($fp, $data) {
     $json = json_encode($data);
     if ($json === false) {
@@ -149,6 +197,12 @@ if ($method === 'POST') {
         }
         if (!is_array($current) || !$current) {
             $current = array('players' => array(), 'properties' => array(), 'transactions' => array(), 'requests' => array());
+        }
+        if (mb_is_duplicate_request($oldReqs, $req)) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            echo json_encode(array('ok' => false, 'duplicate' => true, 'requests' => $oldReqs));
+            exit;
         }
         $current['requests'] = mb_merge_requests($oldReqs, array($req));
         $ok = mb_write_state($fp, $current);
