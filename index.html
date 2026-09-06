@@ -198,6 +198,15 @@
         .qa-pay { background: #dc2626; }
         .qa-recv { background: #16a34a; }
         .qa-xfer { background: #2563eb; }
+        .qa-trade { background: #7c3aed; }
+        .trade-pick {
+            border: 1.5px solid #e4ddd0; border-radius: 12px; padding: 8px 10px; margin-bottom: 6px;
+            cursor: pointer; display: flex; gap: 8px; align-items: center; background: #fff;
+        }
+        .trade-pick.on { border-color: var(--felt); background: #e8f2eb; }
+        .trade-pick .tp-code { font-size: 10px; font-weight: 800; }
+        .trade-side { font-size: 12px; line-height: 1.4; }
+        .trade-side b { display: block; margin-bottom: 4px; }
         .toast {
             position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%);
             background: var(--felt); color: #fff; padding: 12px 20px; border-radius: 14px;
@@ -497,6 +506,7 @@
 
     <div id="roleOverlay" class="role-overlay role-pick hidden"></div>
     <div id="requestOverlay" class="role-overlay hidden"></div>
+    <div id="tradeOverlay" class="role-overlay hidden"></div>
     <div id="debtOverlay" class="role-overlay hidden"></div>
     <div id="modalContainer"></div>
     <div id="toastContainer"></div>
@@ -594,6 +604,12 @@ let roleGateOpen = false;
 let requestGateOpen = false;
 let shownRequestId = null;
 let lastDebtToastAt = 0;
+let resolvingRequestId = null;
+let saveInFlight = false;
+let bankerPopupHoldUntil = 0;
+let tradeGateOpen = false;
+let shownTradeId = null;
+let shownTradeRound = -1;
 
 function isServerMode() {
     return location.protocol === 'http:' || location.protocol === 'https:';
@@ -665,16 +681,55 @@ function applyLoaded(data) {
     if (Array.isArray(data.transactions)) state.transactions = data.transactions;
     if (typeof data.colorIndex === 'number') state.colorIndex = data.colorIndex;
     if (data.settings) Object.assign(state.settings, data.settings);
-    state.requests = Array.isArray(data.requests) ? data.requests : [];
+    mergeRequests(Array.isArray(data.requests) ? data.requests : []);
     state.lastFx = data.lastFx || null;
     state.debtSettlement = data.debtSettlement || null;
+}
+function requestProgress(r) {
+    if (!r) return 0;
+    if (r.status === 'approved' || r.status === 'rejected') return 3;
+    if (r.status === 'pending') return 2;
+    if (r.status === 'negotiating') return 1;
+    return 0;
+}
+function mergeRequests(remoteList) {
+    remoteList = Array.isArray(remoteList) ? remoteList : [];
+    const localById = {};
+    (state.requests || []).forEach(function (r) { if (r && r.id) localById[r.id] = r; });
+    const remoteIds = {};
+    const out = [];
+    remoteList.forEach(function (r) {
+        if (!r || !r.id) return;
+        remoteIds[r.id] = true;
+        const loc = localById[r.id];
+        if (!loc) { out.push(r); return; }
+        const lp = requestProgress(loc);
+        const rp = requestProgress(r);
+        if (lp >= 3 && rp < 3) { out.push(loc); return; }
+        if (loc.status === 'negotiating' && r.status === 'negotiating') {
+            const lr = (loc.payload && loc.payload.round) || 0;
+            const rr = (r.payload && r.payload.round) || 0;
+            out.push(rr >= lr ? r : loc);
+            return;
+        }
+        out.push(lp > rp ? loc : r);
+    });
+    const now = Date.now();
+    (state.requests || []).forEach(function (r) {
+        if (!r || !r.id || remoteIds[r.id]) return;
+        const age = now - (r.createdAt || 0);
+        const resolvedAge = now - (r.resolvedAt || 0);
+        if (age < 15000 && (r.status === 'pending' || r.status === 'negotiating')) out.push(r);
+        else if (requestProgress(r) >= 3 && resolvedAge < 15000) out.push(r);
+    });
+    state.requests = out;
 }
 function snapshotStateJson() {
     return JSON.stringify(state);
 }
 function saveState() {
     if (!Array.isArray(state.requests)) state.requests = [];
-    if (suppressSave) return;
+    if (suppressSave || saveInFlight) return;
     if (!isServerMode()) {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
         return;
@@ -682,12 +737,43 @@ function saveState() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
         lastRemoteJson = snapshotStateJson();
+        saveInFlight = true;
         fetch(SAVE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: lastRemoteJson
-        }).catch(function () {});
+        }).then(function () { saveInFlight = false; }, function () { saveInFlight = false; });
     }, 280);
+}
+async function flushSave() {
+    if (!Array.isArray(state.requests)) state.requests = [];
+    if (suppressSave) return;
+    if (!isServerMode()) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+        return;
+    }
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    const body = snapshotStateJson();
+    lastRemoteJson = body;
+    saveInFlight = true;
+    try {
+        await fetch(SAVE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body
+        });
+    } catch (e) {}
+    saveInFlight = false;
+}
+async function mergeRemoteRequestsOnly() {
+    if (!isServerMode()) return;
+    try {
+        const r = await fetch(SAVE_URL, { cache: 'no-store' });
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data && Array.isArray(data.requests)) mergeRequests(data.requests);
+    } catch (e) {}
 }
 function loadStateFromLocal() {
     try {
@@ -1308,7 +1394,12 @@ function amountFieldHtml(id, value) {
 }
 
 function fillMaxAmount(inputId) {
-    const pid = inputId === 'trAmt' ? pickFromId : pickPlayerId;
+    let pid = inputId === 'trAmt' ? pickFromId : pickPlayerId;
+    if (inputId === 'tradeMyCash') {
+        const me = sessionPlayer();
+        pid = me ? me.id : null;
+    }
+    if (inputId === 'tradeTheirCash') pid = pickToId;
     const p = getPlayer(pid);
     if (!p) { showToast('Pilih pemain dulu', 'error'); return; }
     const el = document.getElementById(inputId);
@@ -1601,7 +1692,8 @@ function playerGridHtml(selectedId, onClickName, excludeId) {
     }).join('');
 }
 
-function renderAll() {
+function renderAll(opts) {
+    opts = opts || {};
     applyChrome();
     if (isPlayer()) {
         renderPlayerHome();
@@ -1615,9 +1707,10 @@ function renderAll() {
         renderCashView();
         renderSettingsView();
     }
-    saveState();
+    if (!opts.skipSave) saveState();
     maybeShowDebtOverlay();
-    maybeShowBankerRequestPopup();
+    if (!opts.skipBankerPopup) maybeShowBankerRequestPopup();
+    maybeShowTradeOverlay();
 }
 
 function applyChrome() {
@@ -2398,7 +2491,8 @@ function requestTheme(type, kind) {
         buy: { title: 'Beli aset', icon: 'fa-cart-shopping', color: '#16a34a', flow: 'Pemain → bank' },
         build: { title: 'Bangun rumah', icon: 'fa-house', color: '#0d9488', flow: 'Pemain → bank' },
         mortgage: { title: 'Hipotek', icon: 'fa-file-invoice-dollar', color: '#ea580c', flow: 'Bank → pemain' },
-        unmortgage: { title: 'Tebus hipotek', icon: 'fa-unlock', color: '#ea580c', flow: 'Pemain → bank' }
+        unmortgage: { title: 'Tebus hipotek', icon: 'fa-unlock', color: '#ea580c', flow: 'Pemain → bank' },
+        trade: { title: 'Tukar aset', icon: 'fa-handshake', color: '#7c3aed', flow: 'Pemain ⇄ pemain' }
     };
     return map[type] || { title: type || 'Permintaan', icon: 'fa-bell', color: '#64748b', flow: '' };
 }
@@ -2432,6 +2526,12 @@ function requestAmount(req) {
     }
     if (req.type === 'mortgage' && prop) return prop.mortgage;
     if (req.type === 'unmortgage' && prop) return Math.round(prop.mortgage * 1.1);
+    if (req.type === 'trade') {
+        const oa = (pl.offerA && pl.offerA.cash) || 0;
+        const ob = (pl.offerB && pl.offerB.cash) || 0;
+        const n = Math.abs(oa - ob);
+        return n > 0 ? n : null;
+    }
     return null;
 }
 function reqDetail(req) {
@@ -2452,6 +2552,14 @@ function reqDetail(req) {
     if (pl.payerId) {
         const pay = getPlayer(pl.payerId);
         if (pay) bits.push('dari ' + pay.name);
+    }
+    if (req.type === 'trade') {
+        const a = getPlayer(pl.aId);
+        const b = getPlayer(pl.bId);
+        const na = ((pl.offerA && pl.offerA.propertyIds) || []).length;
+        const nb = ((pl.offerB && pl.offerB.propertyIds) || []).length;
+        bits.push((a ? a.name : '?') + ' ⇄ ' + (b ? b.name : '?'));
+        bits.push(na + '+' + nb + ' aset');
     }
     return bits.join(' · ');
 }
@@ -2476,6 +2584,11 @@ function requestPopupHtml(req) {
     if (pl.reason) rows += reqRow('Alasan', escapeHtml(pl.reason));
     if (req.type === 'rent' && prop && prop.group === 'utility' && pl.dice) rows += reqRow('Dadu', escapeHtml(String(pl.dice)));
     if (req.type === 'build') rows += reqRow('Bangunan', escapeHtml(pl.kind === 'hotel' ? 'Hotel' : (pl.kind === 'sell' ? 'Jual 1' : 'Rumah')));
+    if (req.type === 'trade') {
+        rows += reqRow('Pihak A', miniAvatarHtml(getPlayer(pl.aId)));
+        rows += reqRow('Pihak B', miniAvatarHtml(getPlayer(pl.bId)));
+        rows += '<div class="trade-side mt-2">' + tradeOfferBlockHtml(pl.aId, pl.offerA) + tradeOfferBlockHtml(pl.bId, pl.offerB) + '</div>';
+    }
     return '<div class="req-head" style="background:' + th.color + '">' +
         '<div class="req-icon"><i class="fa-solid ' + th.icon + '"></i></div>' +
         '<div><p class="text-[11px] font-extrabold uppercase tracking-wider opacity-80">Permintaan</p>' +
@@ -2494,9 +2607,351 @@ function reqHtmlBanker(req) {
         '<p class="text-xs font-bold mt-0.5">' + miniAvatarHtml(p) + (amt != null ? ' · ' + formatMoney(amt) : '') + '</p>' +
         '<p class="text-[10px] mt-1" style="color:var(--muted)">' + escapeHtml(reqDetail(req)) + '</p>' +
         '<div class="flex gap-2 mt-2">' +
-        '<button type="button" class="btn btn-recv" style="min-height:40px" onclick="approveRequest(\'' + req.id + '\')">Setujui</button>' +
-        '<button type="button" class="btn btn-danger" style="min-height:40px" onclick="rejectRequest(\'' + req.id + '\')">Tolak</button></div></div>';
+        '<button type="button" class="btn btn-recv" style="min-height:40px"' + (resolvingRequestId ? ' disabled' : '') + ' onclick="approveRequest(\'' + req.id + '\')">Setujui</button>' +
+        '<button type="button" class="btn btn-danger" style="min-height:40px"' + (resolvingRequestId ? ' disabled' : '') + ' onclick="rejectRequest(\'' + req.id + '\')">Tolak</button></div></div>';
 }
+function stableJson(v) {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(stableJson).join(',') + ']';
+    return '{' + Object.keys(v).sort().map(function (k) { return JSON.stringify(k) + ':' + stableJson(v[k]); }).join(',') + '}';
+}
+function requestFingerprint(playerId, type, payload) {
+    return String(playerId || '') + '|' + String(type || '') + '|' + stableJson(payload || {});
+}
+function isDuplicatePending(playerId, type, payload) {
+    const fp = requestFingerprint(playerId, type, payload);
+    const now = Date.now();
+    return (state.requests || []).some(function (r) {
+        if (!r || r.playerId !== playerId || r.type !== type) return false;
+        if (r.status !== 'pending' && r.status !== 'negotiating') return false;
+        if (now - (r.createdAt || 0) > 8000) return false;
+        return requestFingerprint(r.playerId, r.type, r.payload) === fp;
+    });
+}
+function normalizeOffer(o) {
+    o = o || {};
+    const ids = Array.isArray(o.propertyIds) ? o.propertyIds.filter(Boolean) : [];
+    const cash = Math.max(0, Math.round(parseFloat(o.cash) || 0));
+    return { propertyIds: ids, cash: cash };
+}
+function tradableProps(playerId) {
+    return (state.properties || []).filter(function (p) {
+        return p.ownerId === playerId && !(p.houses > 0) && !p.hotel;
+    });
+}
+function tradeOfferBlockHtml(playerId, offer) {
+    const p = getPlayer(playerId);
+    const o = normalizeOffer(offer);
+    const names = o.propertyIds.map(function (id) {
+        const pr = getProp(id);
+        if (!pr) return '';
+        const tagBg = (GROUP_META[pr.group] || { color: '#1a2e24' }).color;
+        return '<span class="code-badge mr-1" style="background:' + tagBg + ';color:#fff">' + escapeHtml(propCode(pr)) + '</span> ' + escapeHtml(pr.name) + (pr.mortgaged ? ' (hipotek)' : '');
+    }).filter(Boolean);
+    return '<div class="mb-2"><b>' + escapeHtml(p ? p.name : '?') + ' memberi</b>' +
+        (names.length ? '<p class="text-xs">' + names.join('<br>') + '</p>' : '<p class="text-xs" style="color:var(--muted)">Tidak ada aset</p>') +
+        (o.cash > 0 ? '<p class="text-xs font-extrabold">' + formatMoney(o.cash) + '</p>' : '') + '</div>';
+}
+function validateTradePayload(pl) {
+    const a = getPlayer(pl.aId);
+    const b = getPlayer(pl.bId);
+    if (!a || !b || a.id === b.id) return { ok: false, reason: 'Pemain tidak valid' };
+    if (a.bankrupt || b.bankrupt) return { ok: false, reason: 'Pemain bangkrut tidak bisa tukar' };
+    const oa = normalizeOffer(pl.offerA);
+    const ob = normalizeOffer(pl.offerB);
+    if (!oa.propertyIds.length && !ob.propertyIds.length && oa.cash <= 0 && ob.cash <= 0) {
+        return { ok: false, reason: 'Tawaran kosong' };
+    }
+    function checkOffer(player, offer) {
+        if (offer.cash > 0 && player.balance < offer.cash) return 'Saldo ' + player.name + ' kurang';
+        for (let i = 0; i < offer.propertyIds.length; i++) {
+            const prop = getProp(offer.propertyIds[i]);
+            if (!prop || prop.ownerId !== player.id) return 'Aset tidak milik ' + player.name;
+            if (prop.houses > 0 || prop.hotel) return 'Jual bangunan dulu: ' + prop.name;
+        }
+        return null;
+    }
+    const e1 = checkOffer(a, oa);
+    if (e1) return { ok: false, reason: e1 };
+    const e2 = checkOffer(b, ob);
+    if (e2) return { ok: false, reason: e2 };
+    return { ok: true };
+}
+function applyApprovedTrade(pl) {
+    const v = validateTradePayload(pl);
+    if (!v.ok) { showToast(v.reason, 'error'); return false; }
+    const a = getPlayer(pl.aId);
+    const b = getPlayer(pl.bId);
+    const oa = normalizeOffer(pl.offerA);
+    const ob = normalizeOffer(pl.offerB);
+    const old = snapshotBalances();
+    oa.propertyIds.forEach(function (id) {
+        const prop = getProp(id);
+        if (!prop) return;
+        prop.ownerId = b.id;
+        pushTx({ type: 'deed', from: a.id, to: b.id, propertyId: id, amount: 0, reason: 'Tukar ' + prop.name });
+    });
+    ob.propertyIds.forEach(function (id) {
+        const prop = getProp(id);
+        if (!prop) return;
+        prop.ownerId = a.id;
+        pushTx({ type: 'deed', from: b.id, to: a.id, propertyId: id, amount: 0, reason: 'Tukar ' + prop.name });
+    });
+    if (oa.cash > 0) {
+        a.balance -= oa.cash;
+        b.balance += oa.cash;
+        pushTx({ type: 'p2p', from: a.id, to: b.id, amount: oa.cash, reason: 'Uang tukar' });
+    }
+    if (ob.cash > 0) {
+        b.balance -= ob.cash;
+        a.balance += ob.cash;
+        pushTx({ type: 'p2p', from: b.id, to: a.id, amount: ob.cash, reason: 'Uang tukar' });
+    }
+    const net = oa.cash - ob.cash;
+    const from = net >= 0 ? a.id : b.id;
+    const to = net >= 0 ? b.id : a.id;
+    finishMoney(from, to, old, 'Tukar aset', Math.abs(net) || 0);
+    return true;
+}
+function activeTradeBetween(id1, id2) {
+    return (state.requests || []).find(function (r) {
+        if (!r || r.type !== 'trade' || r.status !== 'negotiating') return false;
+        const pl = r.payload || {};
+        return (pl.aId === id1 && pl.bId === id2) || (pl.aId === id2 && pl.bId === id1);
+    }) || null;
+}
+function tradePickHtml(playerId, selectedMap, toggleFn) {
+    const list = tradableProps(playerId);
+    if (!list.length) return '<p class="text-xs mb-2" style="color:var(--muted)">Tidak ada aset yang bisa ditukar (jual bangunan dulu bila ada)</p>';
+    return list.map(function (pr) {
+        const on = selectedMap[pr.id] ? ' on' : '';
+        const tagBg = (GROUP_META[pr.group] || { color: '#1a2e24' }).color;
+        return '<div class="trade-pick' + on + '" onclick="' + toggleFn + '(\'' + pr.id + '\')">' +
+            '<span class="tp-code code-badge" style="background:' + tagBg + ';color:#fff">' + escapeHtml(propCode(pr)) + '</span>' +
+            '<span class="text-xs font-bold flex-1">' + escapeHtml(pr.name) + (pr.mortgaged ? ' · hipotek' : '') + '</span></div>';
+    }).join('');
+}
+function readTradeForm(aId, bId) {
+    const myMap = window._tradeMy || {};
+    const theirMap = window._tradeTheir || {};
+    const myCash = parseFloat((document.getElementById('tradeMyCash') || {}).value) || 0;
+    const theirCash = parseFloat((document.getElementById('tradeTheirCash') || {}).value) || 0;
+    return {
+        aId: aId,
+        bId: bId,
+        offerA: normalizeOffer({ propertyIds: Object.keys(myMap).filter(function (k) { return myMap[k]; }), cash: myCash }),
+        offerB: normalizeOffer({ propertyIds: Object.keys(theirMap).filter(function (k) { return theirMap[k]; }), cash: theirCash })
+    };
+}
+function fillTradeMapsFromPayload(pl, myId) {
+    window._tradeMy = {};
+    window._tradeTheir = {};
+    const mine = (pl.aId === myId) ? pl.offerA : pl.offerB;
+    const theirs = (pl.aId === myId) ? pl.offerB : pl.offerA;
+    (mine.propertyIds || []).forEach(function (id) { window._tradeMy[id] = true; });
+    (theirs.propertyIds || []).forEach(function (id) { window._tradeTheir[id] = true; });
+    return { myCash: (mine && mine.cash) || 0, theirCash: (theirs && theirs.cash) || 0 };
+}
+function toggleTradeMine(id) {
+    window._tradeMy = window._tradeMy || {};
+    window._tradeMy[id] = !window._tradeMy[id];
+    const g = document.getElementById('tradeMyGrid');
+    const me = sessionPlayer();
+    if (g && me) g.innerHTML = tradePickHtml(me.id, window._tradeMy, 'toggleTradeMine');
+}
+function toggleTradeTheirs(id) {
+    window._tradeTheir = window._tradeTheir || {};
+    window._tradeTheir[id] = !window._tradeTheir[id];
+    const g = document.getElementById('tradeTheirGrid');
+    if (g && pickToId) g.innerHTML = tradePickHtml(pickToId, window._tradeTheir, 'toggleTradeTheirs');
+}
+function playerRequestTrade(counterReqId) {
+    if (!playerCanRequest()) { showToast('Tidak bisa menawar', 'error'); return; }
+    const me = sessionPlayer();
+    const counter = counterReqId ? (state.requests || []).find(function (r) { return r.id === counterReqId; }) : null;
+    pickToId = counter ? ((counter.payload.aId === me.id) ? counter.payload.bId : counter.payload.aId) : null;
+    window._tradeCounterId = counter ? counter.id : '';
+    window._tradeMy = {};
+    window._tradeTheir = {};
+    let myCash = 0;
+    let theirCash = 0;
+    if (counter) {
+        const filled = fillTradeMapsFromPayload(counter.payload, me.id);
+        myCash = filled.myCash;
+        theirCash = filled.theirCash;
+        pickToId = (counter.payload.aId === me.id) ? counter.payload.bId : counter.payload.aId;
+    }
+    openModal('<div class="text-xl font-extrabold mb-3 pr-10">' + (counter ? 'Tawar balik' : 'Tukar aset') + '</div>' +
+        (counter ? '' : '<p class="text-xs mb-2" style="color:var(--muted)">Pilih lawan</p><div id="tradePeerGrid" class="player-grid mb-3">' +
+            playerGridHtml(pickToId, 'setTradePeer', me.id) + '</div>') +
+        '<p class="text-xs font-extrabold mb-1">Aset yang kamu beri</p><div id="tradeMyGrid" class="mb-2">' + tradePickHtml(me.id, window._tradeMy, 'toggleTradeMine') + '</div>' +
+        amountFieldHtml('tradeMyCash', myCash) +
+        '<p class="text-[10px] mb-3" style="color:var(--muted)">Uang tambahan dari kamu (boleh 0)</p>' +
+        '<p class="text-xs font-extrabold mb-1">Aset yang kamu minta</p><div id="tradeTheirGrid" class="mb-2">' +
+        (pickToId ? tradePickHtml(pickToId, window._tradeTheir, 'toggleTradeTheirs') : '<p class="text-xs" style="color:var(--muted)">Pilih lawan dulu</p>') + '</div>' +
+        amountFieldHtml('tradeTheirCash', theirCash) +
+        '<p class="text-[10px] mb-3" style="color:var(--muted)">Uang tambahan dari lawan (boleh 0)</p>' +
+        btnHtml('btn-recv', 'fa-paper-plane', counter ? 'Kirim tawar balik' : 'Kirim tawaran', 'submitPlayerTrade()'));
+    const cash1 = document.getElementById('tradeMyCash');
+    const cash2 = document.getElementById('tradeTheirCash');
+    if (cash1) cash1.value = myCash || '';
+    if (cash2) cash2.value = theirCash || '';
+}
+function setTradePeer(id) {
+    const me = sessionPlayer();
+    pickToId = pickToId === id ? null : id;
+    const g = document.getElementById('tradePeerGrid');
+    if (g && me) g.innerHTML = playerGridHtml(pickToId, 'setTradePeer', me.id);
+    const tg = document.getElementById('tradeTheirGrid');
+    window._tradeTheir = {};
+    if (tg) tg.innerHTML = pickToId ? tradePickHtml(pickToId, window._tradeTheir, 'toggleTradeTheirs') : '<p class="text-xs" style="color:var(--muted)">Pilih lawan dulu</p>';
+}
+function submitPlayerTrade() {
+    const me = sessionPlayer();
+    if (!me || !playerCanRequest()) return;
+    const counterId = window._tradeCounterId || '';
+    const counter = counterId ? (state.requests || []).find(function (r) { return r.id === counterId; }) : null;
+    let peerId = pickToId;
+    if (counter) peerId = counter.payload.aId === me.id ? counter.payload.bId : counter.payload.aId;
+    if (!peerId) { showToast('Pilih lawan', 'error'); return; }
+    const form = readTradeForm(me.id, peerId);
+    const payload = {
+        aId: me.id,
+        bId: peerId,
+        offerA: form.offerA,
+        offerB: form.offerB,
+        waitingOn: peerId,
+        round: counter ? ((counter.payload.round || 1) + 1) : 1
+    };
+    if (counter) {
+        payload.aId = counter.payload.aId;
+        payload.bId = counter.payload.bId;
+        if (me.id === payload.aId) {
+            payload.offerA = form.offerA;
+            payload.offerB = form.offerB;
+        } else {
+            payload.offerA = form.offerB;
+            payload.offerB = form.offerA;
+        }
+        payload.waitingOn = me.id === payload.aId ? payload.bId : payload.aId;
+    }
+    const v = validateTradePayload(payload);
+    if (!v.ok) { showToast(v.reason, 'error'); return; }
+    if (!counter && activeTradeBetween(me.id, peerId)) {
+        showToast('Masih ada tawaran dengan pemain ini', 'error');
+        return;
+    }
+    if (isDuplicatePending(me.id, 'trade', payload)) {
+        closeModal();
+        showToast('Permintaan sama sudah dikirim', 'error');
+        return;
+    }
+    if (counter) {
+        if (counter.status !== 'negotiating' || counter.payload.waitingOn !== me.id) {
+            showToast('Tawaran sudah berubah', 'error');
+            return;
+        }
+        counter.payload = payload;
+        closeModal();
+        hideTradeOverlay();
+        renderAll({ skipSave: true });
+        flushSave();
+        showToast('Tawar balik dikirim', 'success');
+        return;
+    }
+    if (!Array.isArray(state.requests)) state.requests = [];
+    state.requests.push({
+        id: generateId(),
+        playerId: me.id,
+        type: 'trade',
+        payload: payload,
+        status: 'negotiating',
+        createdAt: Date.now(),
+        resolvedAt: null,
+        bankerNote: ''
+    });
+    closeModal();
+    renderAll({ skipSave: true });
+    flushSave();
+    showToast('Tawaran dikirim', 'success');
+}
+function incomingTradeForMe() {
+    const me = sessionPlayer();
+    if (!me) return null;
+    return (state.requests || []).filter(function (r) {
+        return r.type === 'trade' && r.status === 'negotiating' && r.payload && r.payload.waitingOn === me.id;
+    }).sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); })[0] || null;
+}
+function hideTradeOverlay() {
+    tradeGateOpen = false;
+    shownTradeId = null;
+    shownTradeRound = -1;
+    const box = document.getElementById('tradeOverlay');
+    if (!box) return;
+    box.classList.add('hidden');
+    box.innerHTML = '';
+}
+function maybeShowTradeOverlay() {
+    if (!isPlayer() || roleGateOpen || moneyFxCanClose) {
+        if (!isPlayer()) hideTradeOverlay();
+        return;
+    }
+    const req = incomingTradeForMe();
+    const box = document.getElementById('tradeOverlay');
+    if (!box) return;
+    if (!req) {
+        hideTradeOverlay();
+        return;
+    }
+    const round = (req.payload && req.payload.round) || 0;
+    if (tradeGateOpen && shownTradeId === req.id && shownTradeRound === round) return;
+    tradeGateOpen = true;
+    shownTradeId = req.id;
+    shownTradeRound = round;
+    const pl = req.payload || {};
+    const other = getPlayer(pl.aId === (appSession && appSession.playerId) ? pl.bId : pl.aId);
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="role-card">' +
+        '<p class="text-lg font-extrabold mb-1">Tawaran tukar</p>' +
+        '<p class="text-xs mb-3" style="color:var(--muted)">Dari ' + escapeHtml(other ? other.name : 'pemain') + '</p>' +
+        tradeOfferBlockHtml(pl.aId, pl.offerA) + tradeOfferBlockHtml(pl.bId, pl.offerB) +
+        '<div class="flex flex-col gap-2 mt-4">' +
+        '<button type="button" class="btn btn-recv" onclick="acceptPlayerTrade(\'' + req.id + '\')">Setuju, ajukan ke banker</button>' +
+        '<button type="button" class="btn btn-ghost" onclick="playerRequestTrade(\'' + req.id + '\')">Tawar balik</button>' +
+        '<button type="button" class="btn btn-danger" onclick="rejectPlayerTrade(\'' + req.id + '\')">Tolak</button></div></div>';
+}
+function acceptPlayerTrade(id) {
+    const me = sessionPlayer();
+    const req = (state.requests || []).find(function (r) { return r.id === id; });
+    if (!me || !req || req.status !== 'negotiating' || req.payload.waitingOn !== me.id) {
+        showToast('Tawaran tidak berlaku', 'error');
+        hideTradeOverlay();
+        return;
+    }
+    const v = validateTradePayload(req.payload);
+    if (!v.ok) { showToast(v.reason, 'error'); return; }
+    req.status = 'pending';
+    req.payload.waitingOn = null;
+    hideTradeOverlay();
+    renderAll({ skipSave: true });
+    flushSave();
+    showToast('Tawaran diajukan ke banker', 'success');
+}
+function rejectPlayerTrade(id) {
+    const me = sessionPlayer();
+    const req = (state.requests || []).find(function (r) { return r.id === id; });
+    if (!me || !req || req.status !== 'negotiating' || req.payload.waitingOn !== me.id) {
+        hideTradeOverlay();
+        return;
+    }
+    req.status = 'rejected';
+    req.resolvedAt = Date.now();
+    hideTradeOverlay();
+    renderAll({ skipSave: true });
+    flushSave();
+    showToast('Tawaran ditolak', 'success');
+}
+
 function enqueueRequest(type, payload) {
     if (!playerCanRequest()) { showToast('Tidak bisa mengirim permintaan', 'error'); return; }
     payload = payload || {};
@@ -2538,6 +2993,11 @@ function enqueueRequest(type, payload) {
         }
     }
     if (!Array.isArray(state.requests)) state.requests = [];
+    if (isDuplicatePending(appSession.playerId, type, payload || {})) {
+        closeModal();
+        showToast('Permintaan sama sudah dikirim', 'error');
+        return;
+    }
     state.requests.push({
         id: generateId(),
         playerId: appSession.playerId,
@@ -2549,7 +3009,8 @@ function enqueueRequest(type, payload) {
         bankerNote: ''
     });
     closeModal();
-    renderAll();
+    renderAll({ skipSave: true });
+    flushSave();
     showToast('Permintaan dikirim', 'success');
 }
 
@@ -2569,7 +3030,8 @@ function renderPlayerHome() {
             '<button type="button" class="qa qa-go" onclick="playerRequestGo()"><i class="fa-solid fa-flag-checkered"></i>Request GO</button>' +
             '<button type="button" class="qa qa-pay" onclick="playerRequestPay()"><i class="fa-solid fa-building-columns"></i>Bayar bank</button>' +
             '<button type="button" class="qa qa-recv" onclick="playerRequestRecv()"><i class="fa-solid fa-hand-holding-dollar"></i>Terima bank</button>' +
-            '<button type="button" class="qa qa-xfer" onclick="playerRequestXfer()"><i class="fa-solid fa-arrow-right-arrow-left"></i>Transfer</button></div>' :
+            '<button type="button" class="qa qa-xfer" onclick="playerRequestXfer()"><i class="fa-solid fa-arrow-right-arrow-left"></i>Transfer</button>' +
+            '<button type="button" class="qa qa-trade" onclick="playerRequestTrade()"><i class="fa-solid fa-handshake"></i>Tukar aset</button></div>' :
             '<p class="empty-card text-sm mb-3">Mode lihat saja (bangkrut).</p>') +
         '<div class="space-y-2 mb-4">' + state.players.map(function (p) {
             return '<div class="player-card" style="cursor:default"><div class="player-avatar" style="background:' + p.color + '">' +
@@ -2596,11 +3058,18 @@ function renderPlayerAssets() {
 
 function renderPlayerQueue() {
     const el = document.getElementById('view-queue');
-    const mine = (state.requests || []).filter(function (r) { return appSession && r.playerId === appSession.playerId; }).slice().reverse();
+    const mine = (state.requests || []).filter(function (r) {
+        if (!appSession) return false;
+        if (r.playerId === appSession.playerId) return true;
+        const pl = r.payload || {};
+        return r.type === 'trade' && (pl.aId === appSession.playerId || pl.bId === appSession.playerId);
+    }).slice().reverse();
     let html = '<p class="section-label">Permintaan saya</p>';
     if (!mine.length) html += '<p class="empty-card text-sm mb-3">Belum ada permintaan</p>';
     else html += mine.map(function (r) {
-        const st = r.status === 'pending' ? 'Menunggu' : (r.status === 'approved' ? 'Disetujui' : 'Ditolak');
+        const st = r.status === 'negotiating'
+            ? ((r.payload && r.payload.waitingOn === (appSession && appSession.playerId)) ? 'Giliran Anda menawar' : 'Menunggu lawan')
+            : (r.status === 'pending' ? 'Menunggu banker' : (r.status === 'approved' ? 'Disetujui' : 'Ditolak'));
         return '<div class="tx-item p-3 mb-2"><p class="text-xs font-bold">' + escapeHtml(reqDetail(r)) + '</p>' +
             '<p class="text-[10px]" style="color:var(--muted)">' + st + (r.bankerNote ? (' · ' + escapeHtml(r.bankerNote)) : '') + '</p></div>';
     }).join('');
@@ -2788,7 +3257,7 @@ function hideRequestOverlay() {
     box.innerHTML = '';
 }
 function oldestPendingRequest() {
-    return (state.requests || []).filter(function (r) { return r.status === 'pending'; })
+    return (state.requests || []).filter(function (r) { return r && r.status === 'pending'; })
         .sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); })[0] || null;
 }
 function syncBankerRequestOverlay() {
@@ -2797,7 +3266,8 @@ function syncBankerRequestOverlay() {
         hideRequestOverlay();
         return;
     }
-    if (!isServerMode() || isPlayer() || roleGateOpen || moneyFxCanClose) return;
+    if (!isServerMode() || isPlayer() || roleGateOpen || moneyFxCanClose || resolvingRequestId) return;
+    if (Date.now() < bankerPopupHoldUntil) return;
     if (shownRequestId) {
         const cur = (state.requests || []).find(function (r) { return r.id === shownRequestId; });
         if (!cur || cur.status !== 'pending') {
@@ -2812,7 +3282,8 @@ function maybeShowBankerRequestPopup() {
         hideRequestOverlay();
         return;
     }
-    if (!isServerMode() || isPlayer() || roleGateOpen || moneyFxCanClose) return;
+    if (!isServerMode() || isPlayer() || roleGateOpen || moneyFxCanClose || resolvingRequestId) return;
+    if (Date.now() < bankerPopupHoldUntil) return;
     const req = oldestPendingRequest();
     const box = document.getElementById('requestOverlay');
     if (!box) return;
@@ -2828,11 +3299,12 @@ function maybeShowBankerRequestPopup() {
         lastBankerSoundReqId = req.id;
         playNotifySound();
     }
+    const busy = !!resolvingRequestId;
     box.classList.remove('hidden');
     box.innerHTML = '<div class="role-card">' + requestPopupHtml(req) +
         '<div class="flex gap-2 mt-4">' +
-        '<button type="button" class="btn btn-recv" onclick="approveRequest(\'' + req.id + '\')">Setujui</button>' +
-        '<button type="button" class="btn btn-danger" onclick="rejectRequest(\'' + req.id + '\')">Tolak</button></div></div>';
+        '<button type="button" class="btn btn-recv"' + (busy ? ' disabled' : '') + ' onclick="approveRequest(\'' + req.id + '\')">Setujui</button>' +
+        '<button type="button" class="btn btn-danger"' + (busy ? ' disabled' : '') + ' onclick="rejectRequest(\'' + req.id + '\')">Tolak</button></div></div>';
 }
 function approveRequest(id) {
     if (isPlayer()) return;
@@ -2843,49 +3315,39 @@ function rejectRequest(id) {
     resolveRequest(id, false);
 }
 async function resolveRequest(id, approve) {
-    if (isPlayer()) return;
-    if (isServerMode()) {
-        try {
-            const okPull = await loadStateFromServer();
-            if (!okPull) {
-                showToast('Gagal sinkron data', 'error');
-                return;
-            }
-        } catch (e) {
-            showToast('Gagal sinkron data', 'error');
-            return;
-        }
-    }
+    if (isPlayer() || resolvingRequestId) return;
+    resolvingRequestId = id;
     const req = (state.requests || []).find(function (r) { return r.id === id; });
     if (!req || req.status !== 'pending') {
         hideRequestOverlay();
         showToast('Sudah diproses di perangkat lain', 'success');
-        suppressSave = true;
-        if (!isPlayer()) {
-            renderPlayersView();
-            renderBoardView();
-            renderCashView();
-            renderSettingsView();
-        }
-        suppressSave = false;
-        maybeShowBankerRequestPopup();
+        await mergeRemoteRequestsOnly();
+        bankerPopupHoldUntil = Date.now() + 450;
+        resolvingRequestId = null;
+        setTimeout(function () { maybeShowBankerRequestPopup(); }, 450);
         return;
     }
     if (approve) {
         const ok = applyApprovedRequest(req);
-        if (!ok) return;
+        if (!ok) {
+            resolvingRequestId = null;
+            return;
+        }
         req.status = 'approved';
         req.resolvedAt = Date.now();
-        hideRequestOverlay();
-        renderAll();
     } else {
         req.status = 'rejected';
         req.bankerNote = '';
         req.resolvedAt = Date.now();
-        hideRequestOverlay();
-        renderAll();
         showToast('Permintaan ditolak', 'success');
     }
+    hideRequestOverlay();
+    bankerPopupHoldUntil = Date.now() + 450;
+    renderAll({ skipSave: true, skipBankerPopup: true });
+    await mergeRemoteRequestsOnly();
+    await flushSave();
+    resolvingRequestId = null;
+    setTimeout(function () { maybeShowBankerRequestPopup(); }, 450);
 }
 function applyApprovedRequest(req) {
     const pl = req.payload || {};
@@ -2965,6 +3427,7 @@ function applyApprovedRequest(req) {
     }
     if (req.type === 'mortgage') { mortgageProp(pl.propertyId); return true; }
     if (req.type === 'unmortgage') { unmortgageProp(pl.propertyId); return true; }
+    if (req.type === 'trade') return applyApprovedTrade(pl);
     showToast('Jenis permintaan tidak dikenal', 'error');
     return false;
 }
@@ -3016,6 +3479,7 @@ function confirmPlayerJoin() {
 }
 function logoutSession() {
     hideRequestOverlay();
+    hideTradeOverlay();
     hideDebtOverlay();
     writeSession(null);
     if (isServerMode()) showRoleModal();
@@ -3025,10 +3489,13 @@ function logoutSession() {
 function modalIsOpen() {
     return !!document.querySelector('#modalContainer .modal-overlay') || moneyFxCanClose;
 }
+function pollBusy() {
+    return modalIsOpen() || roleGateOpen || resolvingRequestId || saveInFlight;
+}
 function startPolling() {
     if (!isServerMode() || pollTimer) return;
     pollTimer = setInterval(async function () {
-        if (modalIsOpen() || roleGateOpen) return;
+        if (pollBusy()) return;
         try {
             const r = await fetch(SAVE_URL, { cache: 'no-store' });
             if (!r.ok) return;
@@ -3056,6 +3523,7 @@ function startPolling() {
             maybePlayRemoteFx();
             maybeShowDebtOverlay();
             syncBankerRequestOverlay();
+            maybeShowTradeOverlay();
         } catch (e) {}
     }, 2500);
 }
