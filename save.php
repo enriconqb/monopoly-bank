@@ -11,6 +11,88 @@ if (!is_dir($dir) && !mkdir($dir, 0777, true) && !is_dir($dir)) {
     exit;
 }
 
+function mb_req_progress($r) {
+    if (!is_array($r) || !isset($r['status'])) {
+        return 0;
+    }
+    $s = $r['status'];
+    if ($s === 'approved' || $s === 'rejected') {
+        return 3;
+    }
+    if ($s === 'pending') {
+        return 2;
+    }
+    if ($s === 'negotiating') {
+        return 1;
+    }
+    return 0;
+}
+
+function mb_merge_requests($existing, $incoming) {
+    $byId = array();
+    if (is_array($existing)) {
+        foreach ($existing as $r) {
+            if (is_array($r) && isset($r['id'])) {
+                $byId[$r['id']] = $r;
+            }
+        }
+    }
+    if (is_array($incoming)) {
+        foreach ($incoming as $r) {
+            if (!is_array($r) || !isset($r['id'])) {
+                continue;
+            }
+            $id = $r['id'];
+            if (!isset($byId[$id])) {
+                $byId[$id] = $r;
+                continue;
+            }
+            $old = $byId[$id];
+            $lp = mb_req_progress($old);
+            $rp = mb_req_progress($r);
+            if ($lp >= 3 && $rp < 3) {
+                continue;
+            }
+            if (isset($old['status'], $r['status']) && $old['status'] === 'negotiating' && $r['status'] === 'negotiating') {
+                $lr = 0;
+                $rr = 0;
+                if (isset($old['payload']) && is_array($old['payload']) && isset($old['payload']['round'])) {
+                    $lr = intval($old['payload']['round']);
+                }
+                if (isset($r['payload']) && is_array($r['payload']) && isset($r['payload']['round'])) {
+                    $rr = intval($r['payload']['round']);
+                }
+                $byId[$id] = ($rr >= $lr) ? $r : $old;
+                continue;
+            }
+            $byId[$id] = ($rp >= $lp) ? $r : $old;
+        }
+    }
+    return array_values($byId);
+}
+
+function mb_read_state($fp) {
+    rewind($fp);
+    $raw = stream_get_contents($fp);
+    if ($raw === false || $raw === '') {
+        return array();
+    }
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : array();
+}
+
+function mb_write_state($fp, $data) {
+    $json = json_encode($data);
+    if ($json === false) {
+        return false;
+    }
+    rewind($fp);
+    if (!ftruncate($fp, 0)) {
+        return false;
+    }
+    return fwrite($fp, $json) !== false;
+}
+
 $method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
 
 if ($method === 'GET') {
@@ -18,25 +100,82 @@ if ($method === 'GET') {
         echo 'null';
         exit;
     }
-    $raw = file_get_contents($file);
+    $fp = fopen($file, 'r');
+    if ($fp === false) {
+        echo 'null';
+        exit;
+    }
+    flock($fp, LOCK_SH);
+    $raw = stream_get_contents($fp);
+    flock($fp, LOCK_UN);
+    fclose($fp);
     echo ($raw === false || $raw === '') ? 'null' : $raw;
     exit;
 }
 
 if ($method === 'POST') {
     $raw = file_get_contents('php://input');
-    json_decode($raw);
-    if (json_last_error() !== JSON_ERROR_NONE) {
+    $incoming = json_decode($raw, true);
+    if (!is_array($incoming)) {
         http_response_code(400);
         echo json_encode(array('ok' => false, 'error' => 'invalid json'));
         exit;
     }
-    if (file_put_contents($file, $raw, LOCK_EX) === false) {
+
+    $fp = fopen($file, 'c+');
+    if ($fp === false) {
         http_response_code(500);
         echo json_encode(array('ok' => false, 'error' => 'write failed'));
         exit;
     }
-    echo json_encode(array('ok' => true));
+    if (!flock($fp, LOCK_EX)) {
+        fclose($fp);
+        http_response_code(500);
+        echo json_encode(array('ok' => false, 'error' => 'lock failed'));
+        exit;
+    }
+
+    $current = mb_read_state($fp);
+    $oldReqs = (isset($current['requests']) && is_array($current['requests'])) ? $current['requests'] : array();
+
+    if (isset($incoming['_op']) && $incoming['_op'] === 'upsertRequest' && isset($incoming['request']) && is_array($incoming['request'])) {
+        $req = $incoming['request'];
+        if (!isset($req['id'])) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            http_response_code(400);
+            echo json_encode(array('ok' => false, 'error' => 'request id required'));
+            exit;
+        }
+        if (!is_array($current) || !$current) {
+            $current = array('players' => array(), 'properties' => array(), 'transactions' => array(), 'requests' => array());
+        }
+        $current['requests'] = mb_merge_requests($oldReqs, array($req));
+        $ok = mb_write_state($fp, $current);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        if (!$ok) {
+            http_response_code(500);
+            echo json_encode(array('ok' => false, 'error' => 'write failed'));
+            exit;
+        }
+        echo json_encode(array('ok' => true, 'requests' => $current['requests']));
+        exit;
+    }
+
+    unset($incoming['_op']);
+    unset($incoming['request']);
+    $newReqs = (isset($incoming['requests']) && is_array($incoming['requests'])) ? $incoming['requests'] : array();
+    $incoming['requests'] = mb_merge_requests($oldReqs, $newReqs);
+    $ok = mb_write_state($fp, $incoming);
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    if (!$ok) {
+        http_response_code(500);
+        echo json_encode(array('ok' => false, 'error' => 'write failed'));
+        exit;
+    }
+    echo json_encode(array('ok' => true, 'requests' => $incoming['requests']));
     exit;
 }
 

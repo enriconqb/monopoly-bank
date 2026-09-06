@@ -264,6 +264,16 @@
         .view.active { display: block; }
         .badge { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 9999px; }
         .section-label { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 8px; }
+        .inbox-tabs {
+            display: flex; gap: 8px; margin-bottom: 14px; padding: 4px;
+            background: #efe8dc; border-radius: 14px;
+        }
+        .inbox-tab {
+            flex: 1; border: none; border-radius: 11px; min-height: 40px;
+            font-family: inherit; font-size: 11px; font-weight: 800; cursor: pointer;
+            background: transparent; color: var(--muted); padding: 8px 6px;
+        }
+        .inbox-tab.active { background: var(--felt); color: #f4efe4; }
         .tx-go { border-left: 4px solid #d97706; }
         .tx-pay, .tx-rent { border-left: 4px solid #dc2626; }
         .tx-recv { border-left: 4px solid #16a34a; }
@@ -604,6 +614,7 @@ let roleGateOpen = false;
 let requestGateOpen = false;
 let shownRequestId = null;
 let lastDebtToastAt = 0;
+let playerInboxTab = 'status';
 let resolvingRequestId = null;
 let saveInFlight = false;
 let bankerPopupHoldUntil = 0;
@@ -758,13 +769,37 @@ async function flushSave() {
     lastRemoteJson = body;
     saveInFlight = true;
     try {
-        await fetch(SAVE_URL, {
+        const res = await fetch(SAVE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: body
         });
+        if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.requests)) mergeRequests(data.requests);
+        }
     } catch (e) {}
     saveInFlight = false;
+}
+async function upsertRequestOnServer(req) {
+    if (!req) return false;
+    if (!isServerMode()) {
+        saveState();
+        return true;
+    }
+    try {
+        const res = await fetch(SAVE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ _op: 'upsertRequest', request: req })
+        });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data && Array.isArray(data.requests)) mergeRequests(data.requests);
+        return !!(data && data.ok);
+    } catch (e) {
+        return false;
+    }
 }
 async function mergeRemoteRequestsOnly() {
     if (!isServerMode()) return;
@@ -1033,6 +1068,7 @@ function closeModal() {
         box.innerHTML = '';
         pickPlayerId = pickFromId = pickToId = pickExcludeId = null;
         modalClosing = false;
+        maybeShowTradeOverlay();
     };
     if (reduceMotion() || typeof gsap === 'undefined') {
         finish();
@@ -1723,7 +1759,7 @@ function applyChrome() {
             '<button type="button" class="nav-item" data-view="players" onclick="showView(\'players\')"><span class="nav-icon"><i class="fa-solid fa-house"></i></span><span class="nav-label">Beranda</span></button>' +
             '<button type="button" class="nav-item" data-view="cash" onclick="showView(\'cash\')"><span class="nav-icon"><i class="fa-solid fa-file-lines"></i></span><span class="nav-label">Aset</span></button>' +
             '<button type="button" class="nav-item" data-view="board" onclick="showView(\'board\')"><span class="nav-icon"><i class="fa-solid fa-building"></i></span><span class="nav-label">Papan</span></button>' +
-            '<button type="button" class="nav-item" data-view="queue" onclick="showView(\'queue\')"><span class="nav-icon"><i class="fa-solid fa-inbox"></i></span><span class="nav-label">Antrian</span></button>' +
+            '<button type="button" class="nav-item" data-view="queue" onclick="showView(\'queue\')"><span class="nav-icon"><i class="fa-solid fa-inbox"></i></span><span class="nav-label">Notifikasi</span></button>' +
             '<button type="button" class="nav-item" data-view="settings" onclick="showView(\'settings\')"><span class="nav-icon"><i class="fa-solid fa-gear"></i></span><span class="nav-label">Setelan</span></button>';
     } else {
         if (sub) sub.textContent = 'by EnricoNQB';
@@ -2767,6 +2803,7 @@ function toggleTradeTheirs(id) {
 }
 function playerRequestTrade(counterReqId) {
     if (!playerCanRequest()) { showToast('Tidak bisa menawar', 'error'); return; }
+    hideTradeOverlay();
     const me = sessionPlayer();
     const counter = counterReqId ? (state.requests || []).find(function (r) { return r.id === counterReqId; }) : null;
     pickToId = counter ? ((counter.payload.aId === me.id) ? counter.payload.bId : counter.payload.aId) : null;
@@ -2855,12 +2892,12 @@ function submitPlayerTrade() {
         closeModal();
         hideTradeOverlay();
         renderAll({ skipSave: true });
-        flushSave();
+        upsertRequestOnServer(counter);
         showToast('Tawar balik dikirim', 'success');
         return;
     }
     if (!Array.isArray(state.requests)) state.requests = [];
-    state.requests.push({
+    const tradeReq = {
         id: generateId(),
         playerId: me.id,
         type: 'trade',
@@ -2869,10 +2906,11 @@ function submitPlayerTrade() {
         createdAt: Date.now(),
         resolvedAt: null,
         bankerNote: ''
-    });
+    };
+    state.requests.push(tradeReq);
     closeModal();
     renderAll({ skipSave: true });
-    flushSave();
+    upsertRequestOnServer(tradeReq);
     showToast('Tawaran dikirim', 'success');
 }
 function incomingTradeForMe() {
@@ -2892,7 +2930,7 @@ function hideTradeOverlay() {
     box.innerHTML = '';
 }
 function maybeShowTradeOverlay() {
-    if (!isPlayer() || roleGateOpen || moneyFxCanClose) {
+    if (!isPlayer() || roleGateOpen || moneyFxCanClose || modalIsOpen()) {
         if (!isPlayer()) hideTradeOverlay();
         return;
     }
@@ -2934,7 +2972,7 @@ function acceptPlayerTrade(id) {
     req.payload.waitingOn = null;
     hideTradeOverlay();
     renderAll({ skipSave: true });
-    flushSave();
+    upsertRequestOnServer(req);
     showToast('Tawaran diajukan ke banker', 'success');
 }
 function rejectPlayerTrade(id) {
@@ -2948,7 +2986,7 @@ function rejectPlayerTrade(id) {
     req.resolvedAt = Date.now();
     hideTradeOverlay();
     renderAll({ skipSave: true });
-    flushSave();
+    upsertRequestOnServer(req);
     showToast('Tawaran ditolak', 'success');
 }
 
@@ -2998,7 +3036,7 @@ function enqueueRequest(type, payload) {
         showToast('Permintaan sama sudah dikirim', 'error');
         return;
     }
-    state.requests.push({
+    const req = {
         id: generateId(),
         playerId: appSession.playerId,
         type: type,
@@ -3007,10 +3045,11 @@ function enqueueRequest(type, payload) {
         createdAt: Date.now(),
         resolvedAt: null,
         bankerNote: ''
-    });
+    };
+    state.requests.push(req);
     closeModal();
     renderAll({ skipSave: true });
-    flushSave();
+    upsertRequestOnServer(req);
     showToast('Permintaan dikirim', 'success');
 }
 
@@ -3056,24 +3095,37 @@ function renderPlayerAssets() {
     });
 }
 
+function setPlayerInboxTab(tab) {
+    playerInboxTab = tab === 'history' ? 'history' : 'status';
+    renderPlayerQueue();
+}
 function renderPlayerQueue() {
     const el = document.getElementById('view-queue');
+    if (!el) return;
+    const tab = playerInboxTab === 'history' ? 'history' : 'status';
     const mine = (state.requests || []).filter(function (r) {
         if (!appSession) return false;
         if (r.playerId === appSession.playerId) return true;
         const pl = r.payload || {};
         return r.type === 'trade' && (pl.aId === appSession.playerId || pl.bId === appSession.playerId);
     }).slice().reverse();
-    let html = '<p class="section-label">Permintaan saya</p>';
-    if (!mine.length) html += '<p class="empty-card text-sm mb-3">Belum ada permintaan</p>';
-    else html += mine.map(function (r) {
-        const st = r.status === 'negotiating'
-            ? ((r.payload && r.payload.waitingOn === (appSession && appSession.playerId)) ? 'Giliran Anda menawar' : 'Menunggu lawan')
-            : (r.status === 'pending' ? 'Menunggu banker' : (r.status === 'approved' ? 'Disetujui' : 'Ditolak'));
-        return '<div class="tx-item p-3 mb-2"><p class="text-xs font-bold">' + escapeHtml(reqDetail(r)) + '</p>' +
-            '<p class="text-[10px]" style="color:var(--muted)">' + st + (r.bankerNote ? (' · ' + escapeHtml(r.bankerNote)) : '') + '</p></div>';
-    }).join('');
-    html += '<p class="section-label">Riwayat permainan</p>' + txListHtml();
+    let html = '<div class="inbox-tabs">' +
+        '<button type="button" class="inbox-tab' + (tab === 'status' ? ' active' : '') + '" onclick="setPlayerInboxTab(\'status\')">Status permintaan</button>' +
+        '<button type="button" class="inbox-tab' + (tab === 'history' ? ' active' : '') + '" onclick="setPlayerInboxTab(\'history\')">Riwayat Permainan</button>' +
+        '</div>';
+    if (tab === 'status') {
+        html += '<p class="section-label">Permintaan saya</p>';
+        if (!mine.length) html += '<p class="empty-card text-sm mb-3">Belum ada permintaan</p>';
+        else html += mine.map(function (r) {
+            const st = r.status === 'negotiating'
+                ? ((r.payload && r.payload.waitingOn === (appSession && appSession.playerId)) ? 'Giliran Anda menawar' : 'Menunggu lawan')
+                : (r.status === 'pending' ? 'Menunggu banker' : (r.status === 'approved' ? 'Disetujui' : 'Ditolak'));
+            return '<div class="tx-item p-3 mb-2"><p class="text-xs font-bold">' + escapeHtml(reqDetail(r)) + '</p>' +
+                '<p class="text-[10px]" style="color:var(--muted)">' + st + (r.bankerNote ? (' · ' + escapeHtml(r.bankerNote)) : '') + '</p></div>';
+        }).join('');
+    } else {
+        html += '<p class="section-label">Alur permainan</p>' + txListHtml();
+    }
     el.innerHTML = html;
 }
 function renderPlayerSettings() {
@@ -3548,7 +3600,7 @@ function startPolling() {
             syncBankerRequestOverlay();
             maybeShowTradeOverlay();
         } catch (e) {}
-    }, 2500);
+    }, 800);
 }
 
 async function bootApp() {
