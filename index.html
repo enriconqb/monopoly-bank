@@ -2660,7 +2660,7 @@ function isDuplicatePending(playerId, type, payload) {
     return (state.requests || []).some(function (r) {
         if (!r || r.playerId !== playerId || r.type !== type) return false;
         if (r.status !== 'pending' && r.status !== 'negotiating') return false;
-        if (now - (r.createdAt || 0) > 8000) return false;
+        if (now - (r.createdAt || 0) > 5000) return false;
         return requestFingerprint(r.playerId, r.type, r.payload) === fp;
     });
 }
@@ -2880,7 +2880,7 @@ function submitPlayerTrade() {
     }
     if (isDuplicatePending(me.id, 'trade', payload)) {
         closeModal();
-        showToast('Permintaan sama sudah dikirim', 'error');
+        showToast('Kamu sudah mengajukan, tunggu banker', 'error');
         return;
     }
     if (counter) {
@@ -3033,7 +3033,7 @@ function enqueueRequest(type, payload) {
     if (!Array.isArray(state.requests)) state.requests = [];
     if (isDuplicatePending(appSession.playerId, type, payload || {})) {
         closeModal();
-        showToast('Permintaan sama sudah dikirim', 'error');
+        showToast('Kamu sudah mengajukan, tunggu banker', 'error');
         return;
     }
     const req = {
@@ -3117,11 +3117,19 @@ function renderPlayerQueue() {
         html += '<p class="section-label">Permintaan saya</p>';
         if (!mine.length) html += '<p class="empty-card text-sm mb-3">Belum ada permintaan</p>';
         else html += mine.map(function (r) {
-            const st = r.status === 'negotiating'
-                ? ((r.payload && r.payload.waitingOn === (appSession && appSession.playerId)) ? 'Giliran Anda menawar' : 'Menunggu lawan')
-                : (r.status === 'pending' ? 'Menunggu banker' : (r.status === 'approved' ? 'Disetujui' : 'Ditolak'));
+            let st = 'Menunggu banker';
+            let bg = '#dbeafe';
+            let fg = '#2563eb';
+            if (r.status === 'negotiating') {
+                st = (r.payload && r.payload.waitingOn === (appSession && appSession.playerId)) ? 'Giliran Anda menawar' : 'Menunggu lawan';
+            } else if (r.status === 'approved') {
+                st = 'Disetujui'; bg = '#dcfce7'; fg = '#16a34a';
+            } else if (r.status === 'rejected') {
+                st = 'Ditolak'; bg = '#fee2e2'; fg = '#dc2626';
+            }
             return '<div class="tx-item p-3 mb-2"><p class="text-xs font-bold">' + escapeHtml(reqDetail(r)) + '</p>' +
-                '<p class="text-[10px]" style="color:var(--muted)">' + st + (r.bankerNote ? (' · ' + escapeHtml(r.bankerNote)) : '') + '</p></div>';
+                '<p class="mt-1"><span class="badge" style="background:' + bg + ';color:' + fg + '">' + escapeHtml(st) + '</span>' +
+                (r.bankerNote ? '<span class="text-[10px] ml-1" style="color:var(--muted)"> · ' + escapeHtml(r.bankerNote) + '</span>' : '') + '</p></div>';
         }).join('');
     } else {
         html += '<p class="section-label">Alur permainan</p>' + txListHtml();
