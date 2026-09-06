@@ -148,7 +148,13 @@
             background: #f3efe6; border-radius: 8px; padding: 4px 8px;
             font-size: 11px; font-weight: 700;
         }
-        .trade-prop-off { opacity: .45; cursor: default; }
+        .trade-half.pick { background: #faf8f3; }
+        .trade-sticky-bar {
+            position: sticky; top: 0; z-index: 3;
+            background: inherit; padding: 0 0 8px;
+        }
+        .trade-half.pick .trade-sticky-bar { background: #faf8f3; }
+        .trade-half:not(.pick) .trade-sticky-bar { background: #fff; }
         .modal-content .section-label { margin: 8px 0 4px; }
         .modal-content .btn { min-height: 42px; padding: 10px 14px; font-size: 14px; }
         .modal-content .player-grid { gap: 6px; }
@@ -2816,7 +2822,7 @@ function tradePickHtml(playerId, selectedIds) {
             const cls = blocked ? ' trade-prop-off' : '';
             const click = blocked ? '' : 'toggleTradeAsset(\'' + playerId + '\',\'' + p.id + '\')';
             const build = p.hotel ? '<i class="fa-solid fa-hotel"></i>' : (p.houses ? ('<i class="fa-solid fa-house"></i>'.repeat(p.houses)) : '');
-            html += '<button type="button" class="prop-card w-full' + on + cls + '"' + (click ? ' onclick="' + click + '"' : '') + '>' +
+            html += '<button type="button" class="prop-card w-full' + on + cls + '" data-prop-id="' + p.id + '"' + (click ? ' onclick="' + click + '"' : '') + '>' +
                 '<div class="prop-strip" style="background:' + meta.color + '"></div>' +
                 '<div class="p-2.5">' +
                 '<span class="code-badge">' + escapeHtml(propCode(p)) + '</span>' +
@@ -2859,14 +2865,14 @@ function tradeHalfHtml(side) {
     const cashId = side === 'a' ? 'A' : 'B';
     let body = '<p class="text-[10px] font-bold mb-1" style="color:var(--muted)">Uang yang diberikan</p>' +
         '<input id="tradeCash' + cashId + '" class="input-field mb-2" type="number" inputmode="numeric" placeholder="0" value="' + (offer.cash || '') + '">' +
-        tradeSelectedHtml(offer);
+        '<div id="tradeSel' + cashId + '">' + tradeSelectedHtml(offer) + '</div>';
     if (picking) {
-        body += '<button type="button" class="btn btn-ghost mb-2" style="min-height:36px" onclick="backTradePick(\'' + side + '\')"><i class="fa-solid fa-arrow-left"></i> Tutup pilih aset</button>' +
+        body += '<div class="trade-sticky-bar"><button type="button" class="btn btn-ghost" style="min-height:36px;width:100%" onclick="backTradePick(\'' + side + '\')"><i class="fa-solid fa-arrow-left"></i> Tutup pilih aset</button></div>' +
             tradePickHtml(id, offer.propertyIds);
     } else {
-        body += '<button type="button" class="btn btn-ghost" style="min-height:40px" onclick="openTradeAssetPick(\'' + side + '\')"><i class="fa-solid fa-building"></i> Pilih aset</button>';
+        body += '<div class="trade-sticky-bar"><button type="button" class="btn btn-ghost" style="min-height:40px;width:100%" onclick="openTradeAssetPick(\'' + side + '\')"><i class="fa-solid fa-building"></i> Pilih aset</button></div>';
     }
-    return '<div class="trade-half' + (picking ? ' pick' : '') + '">' +
+    return '<div class="trade-half' + (picking ? ' pick' : '') + '" id="tradeHalf' + cashId + '">' +
         '<div class="flex items-center justify-between mb-2">' +
         '<span class="name-badge" style="background:' + (p ? p.color : '#64748b') + ';color:' + ink + '">' + escapeHtml(p ? p.name : '?') + '</span>' +
         '<span class="text-xs font-extrabold">' + formatMoney(p ? p.balance : 0) + '</span></div>' + body + '</div>';
@@ -2890,7 +2896,15 @@ function refreshTradeDeal() {
         renderTradeDealModal();
         return;
     }
+    const ha = document.getElementById('tradeHalfA');
+    const hb = document.getElementById('tradeHalfB');
+    const sa = ha ? ha.scrollTop : 0;
+    const sb = hb ? hb.scrollTop : 0;
     box.innerHTML = tradeDealInnerHtml();
+    const ha2 = document.getElementById('tradeHalfA');
+    const hb2 = document.getElementById('tradeHalfB');
+    if (ha2) ha2.scrollTop = sa;
+    if (hb2) hb2.scrollTop = sb;
 }
 function openTradeAssetPick(side) {
     syncTradeCashFromDom();
@@ -2913,6 +2927,14 @@ function toggleTradeAsset(playerId, propId) {
     const i = offer.propertyIds.indexOf(propId);
     if (i >= 0) offer.propertyIds.splice(i, 1);
     else offer.propertyIds.push(propId);
+    const half = document.getElementById(side === 'a' ? 'tradeHalfA' : 'tradeHalfB');
+    if (half) {
+        const card = half.querySelector('[data-prop-id="' + propId + '"]');
+        if (card) card.classList.toggle('selected', offer.propertyIds.indexOf(propId) >= 0);
+        const sel = document.getElementById(side === 'a' ? 'tradeSelA' : 'tradeSelB');
+        if (sel) sel.innerHTML = tradeSelectedHtml(offer);
+        return;
+    }
     refreshTradeDeal();
 }
 function playerRequestTrade(counterReqId) {
