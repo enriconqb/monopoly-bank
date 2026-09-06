@@ -140,7 +140,14 @@
             flex: 1; min-height: 0; overflow-y: auto;
             border: 1.5px solid #e4ddd0; border-radius: 16px; padding: 10px; background: #fff;
         }
-        .trade-half.pick { background: #faf8f3; }
+        .trade-sel {
+            display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+        }
+        .trade-sel-item {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: #f3efe6; border-radius: 8px; padding: 4px 8px;
+            font-size: 11px; font-weight: 700;
+        }
         .trade-prop-off { opacity: .45; cursor: default; }
         .modal-content .section-label { margin: 8px 0 4px; }
         .modal-content .btn { min-height: 42px; padding: 10px 14px; font-size: 14px; }
@@ -2822,10 +2829,19 @@ function tradePickHtml(playerId, selectedIds) {
     });
     return html || '<p class="text-xs" style="color:var(--muted)">Tidak ada aset</p>';
 }
-function tradeSummaryLine(offer) {
+function tradeSelectedHtml(offer) {
     const o = normalizeOffer(offer);
-    const n = o.propertyIds.length;
-    return (n ? n + ' aset' : '0 aset') + (o.cash > 0 ? ' · ' + formatMoney(o.cash) : '');
+    if (!o.propertyIds.length) {
+        return '<p class="text-[11px] mb-2" style="color:var(--muted)">Belum pilih aset</p>';
+    }
+    return '<div class="trade-sel">' + o.propertyIds.map(function (id) {
+        const pr = getProp(id);
+        if (!pr) return '';
+        const tagBg = (GROUP_META[pr.group] || { color: '#1a2e24' }).color;
+        return '<span class="trade-sel-item"><span class="code-badge" style="background:' + tagBg + ';color:#fff">' +
+            escapeHtml(propCode(pr)) + '</span> ' + escapeHtml(pr.name) +
+            (pr.mortgaged ? ' · hipotek' : '') + '</span>';
+    }).join('') + '</div>';
 }
 function syncTradeCashFromDom() {
     if (!tradeUi) return;
@@ -2838,49 +2854,66 @@ function tradeHalfHtml(side) {
     const id = side === 'a' ? tradeUi.aId : tradeUi.bId;
     const p = getPlayer(id);
     const offer = side === 'a' ? tradeUi.offerA : tradeUi.offerB;
-    const picking = tradeUi.picking === side;
+    const picking = side === 'a' ? !!tradeUi.pickingA : !!tradeUi.pickingB;
     const ink = p ? textOnColor(p.color) : '#fff';
-    let body;
+    const cashId = side === 'a' ? 'A' : 'B';
+    let body = '<p class="text-[10px] font-bold mb-1" style="color:var(--muted)">Uang yang diberikan</p>' +
+        '<input id="tradeCash' + cashId + '" class="input-field mb-2" type="number" inputmode="numeric" placeholder="0" value="' + (offer.cash || '') + '">' +
+        tradeSelectedHtml(offer);
     if (picking) {
-        body = '<button type="button" class="btn btn-ghost mb-2" style="min-height:36px" onclick="backTradePick()"><i class="fa-solid fa-arrow-left"></i> Kembali</button>' +
+        body += '<button type="button" class="btn btn-ghost mb-2" style="min-height:36px" onclick="backTradePick(\'' + side + '\')"><i class="fa-solid fa-arrow-left"></i> Tutup pilih aset</button>' +
             tradePickHtml(id, offer.propertyIds);
     } else {
-        body = '<p class="text-[10px] font-bold mb-1" style="color:var(--muted)">Uang yang diberikan</p>' +
-            '<input id="tradeCash' + (side === 'a' ? 'A' : 'B') + '" class="input-field mb-2" type="number" inputmode="numeric" placeholder="0" value="' + (offer.cash || '') + '">' +
-            '<p class="text-xs font-bold mb-2">' + escapeHtml(tradeSummaryLine(offer)) + '</p>' +
-            '<button type="button" class="btn btn-ghost" style="min-height:40px" onclick="openTradeAssetPick(\'' + side + '\')"><i class="fa-solid fa-building"></i> Pilih aset</button>';
+        body += '<button type="button" class="btn btn-ghost" style="min-height:40px" onclick="openTradeAssetPick(\'' + side + '\')"><i class="fa-solid fa-building"></i> Pilih aset</button>';
     }
     return '<div class="trade-half' + (picking ? ' pick' : '') + '">' +
         '<div class="flex items-center justify-between mb-2">' +
         '<span class="name-badge" style="background:' + (p ? p.color : '#64748b') + ';color:' + ink + '">' + escapeHtml(p ? p.name : '?') + '</span>' +
         '<span class="text-xs font-extrabold">' + formatMoney(p ? p.balance : 0) + '</span></div>' + body + '</div>';
 }
+function tradeDealInnerHtml() {
+    const submitLabel = tradeUi.role === 'banker' ? 'Ajukan ke antrian' : (tradeUi.counterId ? 'Kirim tawar balik' : 'Kirim tawaran');
+    return '<div class="trade-split" id="tradeSplit">' + tradeHalfHtml('a') + tradeHalfHtml('b') + '</div>' +
+        '<div class="mt-2">' + btnHtml('btn-recv', 'fa-paper-plane', submitLabel, 'submitTradeDeal()') + '</div>';
+}
 function renderTradeDealModal() {
     if (!tradeUi) return;
     const title = tradeUi.counterId ? 'Tawar balik' : 'Tukar aset';
-    const submitLabel = tradeUi.role === 'banker' ? 'Ajukan ke antrian' : (tradeUi.counterId ? 'Kirim tawar balik' : 'Kirim tawaran');
     openModal('<div class="text-lg font-extrabold mb-2 pr-10">' + title + '</div>' +
-        '<div class="trade-split">' + tradeHalfHtml('a') + tradeHalfHtml('b') + '</div>' +
-        '<div class="mt-2">' + btnHtml('btn-recv', 'fa-paper-plane', submitLabel, 'submitTradeDeal()') + '</div>', { full: true });
+        '<div id="tradeDealBody" class="flex flex-col flex-1 min-h-0">' + tradeDealInnerHtml() + '</div>', { full: true });
+}
+function refreshTradeDeal() {
+    if (!tradeUi) return;
+    syncTradeCashFromDom();
+    const box = document.getElementById('tradeDealBody');
+    if (!box) {
+        renderTradeDealModal();
+        return;
+    }
+    box.innerHTML = tradeDealInnerHtml();
 }
 function openTradeAssetPick(side) {
     syncTradeCashFromDom();
-    tradeUi.picking = side;
-    renderTradeDealModal();
+    if (side === 'a') tradeUi.pickingA = true;
+    else tradeUi.pickingB = true;
+    refreshTradeDeal();
 }
-function backTradePick() {
-    tradeUi.picking = null;
-    renderTradeDealModal();
+function backTradePick(side) {
+    syncTradeCashFromDom();
+    if (side === 'a') tradeUi.pickingA = false;
+    else tradeUi.pickingB = false;
+    refreshTradeDeal();
 }
 function toggleTradeAsset(playerId, propId) {
     const p = getProp(propId);
     if (!p || p.houses > 0 || p.hotel) return;
+    syncTradeCashFromDom();
     const side = tradeUi.aId === playerId ? 'a' : 'b';
     const offer = side === 'a' ? tradeUi.offerA : tradeUi.offerB;
     const i = offer.propertyIds.indexOf(propId);
     if (i >= 0) offer.propertyIds.splice(i, 1);
     else offer.propertyIds.push(propId);
-    renderTradeDealModal();
+    refreshTradeDeal();
 }
 function playerRequestTrade(counterReqId) {
     if (!playerCanRequest()) { showToast('Tidak bisa menawar', 'error'); return; }
@@ -2897,12 +2930,13 @@ function playerRequestTrade(counterReqId) {
             counterId: counter.id,
             offerA: normalizeOffer(pl.offerA),
             offerB: normalizeOffer(pl.offerB),
-            picking: null
+            pickingA: false,
+            pickingB: false
         };
         renderTradeDealModal();
         return;
     }
-    tradeUi = { role: 'player', aId: me.id, bId: '', counterId: '', offerA: normalizeOffer({}), offerB: normalizeOffer({}), picking: null };
+    tradeUi = { role: 'player', aId: me.id, bId: '', counterId: '', offerA: normalizeOffer({}), offerB: normalizeOffer({}), pickingA: false, pickingB: false };
     openModal('<div class="text-xl font-extrabold mb-3 pr-10">Tukar aset</div>' +
         '<p class="text-xs mb-3" style="color:var(--muted)">Pilih pemain lawan transaksi</p>' +
         '<div class="player-grid">' + playerGridHtml(null, 'pickPlayerTradePeer', me.id) + '</div>');
@@ -2915,7 +2949,7 @@ function pickPlayerTradePeer(id) {
 function openBankerTrade() {
     if (isPlayer()) return;
     if (activePlayers().length < 2) { showToast('Butuh minimal 2 pemain', 'error'); return; }
-    tradeUi = { role: 'banker', aId: '', bId: '', counterId: '', offerA: normalizeOffer({}), offerB: normalizeOffer({}), picking: null, bankerStep: 1 };
+    tradeUi = { role: 'banker', aId: '', bId: '', counterId: '', offerA: normalizeOffer({}), offerB: normalizeOffer({}), pickingA: false, pickingB: false, bankerStep: 1 };
     openModal('<div class="text-xl font-extrabold mb-3 pr-10">Tukar aset</div>' +
         '<p class="text-xs mb-3" style="color:var(--muted)">Pilih pemain sisi atas</p>' +
         '<div class="player-grid">' + playerGridHtml(null, 'pickBankerTradeA') + '</div>');
