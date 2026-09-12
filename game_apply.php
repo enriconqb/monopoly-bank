@@ -597,6 +597,58 @@ function mb_apply_build(&$s, $propId, $kind) {
     return mb_ok();
 }
 
+function mb_sell_build_once(&$s, $xi) {
+    $p = $s['properties'][$xi];
+    $oi = mb_find_player($s, isset($p['ownerId']) ? $p['ownerId'] : null);
+    if ($oi === null) {
+        return false;
+    }
+    $refund = floor(floatval(isset($p['houseCost']) ? $p['houseCost'] : 0) / 2);
+    if (!empty($p['hotel'])) {
+        if (!mb_even_ok($s, $p, 4, false)) {
+            return false;
+        }
+        $s['properties'][$xi]['hotel'] = false;
+        $s['properties'][$xi]['houses'] = 4;
+        $s['players'][$oi]['balance'] += $refund;
+        mb_push_tx($s, array('type' => 'sell-build', 'from' => 'bank', 'to' => $p['ownerId'], 'propertyId' => $p['id'], 'amount' => $refund, 'reason' => 'Turun hotel ' . $p['name']));
+        return true;
+    }
+    if (intval($p['houses']) > 0) {
+        if (!mb_even_ok($s, $p, intval($p['houses']) - 1, false)) {
+            return false;
+        }
+        $s['properties'][$xi]['houses'] = intval($p['houses']) - 1;
+        $s['players'][$oi]['balance'] += $refund;
+        mb_push_tx($s, array('type' => 'sell-build', 'from' => 'bank', 'to' => $p['ownerId'], 'propertyId' => $p['id'], 'amount' => $refund, 'reason' => 'Jual rumah ' . $p['name']));
+        return true;
+    }
+    return false;
+}
+
+function mb_liquidate_group(&$s, $group) {
+    $guard = 0;
+    while (mb_buildings_on_group($s, $group) && $guard < 80) {
+        $guard++;
+        $bestI = null;
+        $bestLvl = -1;
+        foreach ($s['properties'] as $i => $pr) {
+            if (!isset($pr['group']) || $pr['group'] !== $group) {
+                continue;
+            }
+            $lvl = !empty($pr['hotel']) ? 5 : intval(isset($pr['houses']) ? $pr['houses'] : 0);
+            if ($lvl > $bestLvl) {
+                $bestLvl = $lvl;
+                $bestI = $i;
+            }
+        }
+        if ($bestI === null || $bestLvl <= 0 || !mb_sell_build_once($s, $bestI)) {
+            return false;
+        }
+    }
+    return !mb_buildings_on_group($s, $group);
+}
+
 function mb_apply_mortgage(&$s, $propId) {
     $xi = mb_find_prop($s, $propId);
     if ($xi === null) {
@@ -607,9 +659,10 @@ function mb_apply_mortgage(&$s, $propId) {
     if ($oi === null || !empty($p['mortgaged'])) {
         return mb_fail('Tidak bisa hipotek');
     }
-    if (!empty($p['houses']) || !empty($p['hotel']) || mb_buildings_on_group($s, $p['group'])) {
+    if (!mb_liquidate_group($s, $p['group'])) {
         return mb_fail('Jual semua rumah di set dulu');
     }
+    $p = $s['properties'][$xi];
     $old = mb_balances($s);
     $amt = floatval(isset($p['mortgage']) ? $p['mortgage'] : 0);
     $s['properties'][$xi]['mortgaged'] = true;

@@ -452,7 +452,30 @@
         #debtOverlay .role-card {
             max-height: 100dvh;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
             padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+        }
+        #debtOverlay.debt-dock {
+            background: transparent;
+            backdrop-filter: none;
+            pointer-events: none;
+            align-items: flex-end;
+            z-index: 50;
+        }
+        #debtOverlay.debt-dock .role-card {
+            pointer-events: auto;
+            max-height: 48dvh;
+            box-shadow: 0 -8px 28px rgba(15, 61, 46, 0.18);
+        }
+        #debtOverlay.debt-dock.is-collapsed .role-card {
+            max-height: none;
+        }
+        #debtOverlay.debt-dock.is-collapsed .debt-dock-body { display: none; }
+        .debt-head-actions { margin-left: auto; flex-shrink: 0; }
+        .debt-min-btn {
+            border: none; background: rgba(255,255,255,.2); color: #fff;
+            font-weight: 800; font-size: 11px; border-radius: 8px; padding: 6px 10px; cursor: pointer;
         }
         .debt-head {
             display: flex; align-items: center; gap: 10px; color: #fff;
@@ -481,7 +504,10 @@
         }
         .debt-list {
             display: grid; grid-template-columns: 1fr; gap: 6px;
-            overflow: hidden;
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
+            -webkit-overflow-scrolling: touch;
         }
         .debt-list.debt-list-dense { grid-template-columns: 1fr 1fr; }
         .debt-row {
@@ -679,6 +705,7 @@ let gameOverExpandIdx = 0;
 let pollInFlight = false;
 let pollSeq = 0;
 let pollAppliedSeq = 0;
+let debtBankerCollapsed = false;
 
 function isServerMode() {
     return location.protocol === 'http:' || location.protocol === 'https:';
@@ -1419,7 +1446,9 @@ function hideDebtOverlay() {
     const box = document.getElementById('debtOverlay');
     if (!box) return;
     box.classList.add('hidden');
+    box.classList.remove('debt-dock', 'is-collapsed');
     box.innerHTML = '';
+    debtBankerCollapsed = false;
 }
 function maybeToastDebtForOwner() {
     const d = state.debtSettlement;
@@ -1451,11 +1480,12 @@ function debtAssetRank(pr) {
     if (!pr.mortgaged) return 2;
     return 3;
 }
-function debtHeaderHtml(sub) {
+function debtHeaderHtml(sub, extraBtn) {
     return '<div class="debt-head"><div class="req-icon"><i class="fa-solid fa-file-invoice-dollar"></i></div>' +
         '<div><p class="text-[10px] font-extrabold uppercase tracking-wider opacity-80">Wajib</p>' +
         '<p class="text-base font-extrabold leading-tight">Hipotek wajib</p>' +
-        '<p class="text-[11px] font-bold opacity-90">' + escapeHtml(sub) + '</p></div></div>';
+        '<p class="text-[11px] font-bold opacity-90">' + escapeHtml(sub) + '</p></div>' +
+        (extraBtn || '') + '</div>';
 }
 function debtMeterHtml(payer, amount) {
     const bal = Number(payer.balance) || 0;
@@ -1472,19 +1502,19 @@ function debtAssetCardHtml(pr) {
     const refund = debtSellRefund(pr);
     let action = '';
     if (pr.hotel || pr.houses > 0) {
-        const label = pr.hotel ? 'Jual +' + formatMoney(refund) : 'Jual +' + formatMoney(refund);
-        action = '<button type="button" class="debt-cta debt-cta-in" onclick="debtSellHouse(\'' + pr.id + '\')">' + escapeHtml(label) + '</button>';
-    } else if (!pr.mortgaged && !buildingsOnGroup(pr.group)) {
-        action = '<button type="button" class="debt-cta debt-cta-in" onclick="debtMortgage(\'' + pr.id + '\')">Hipotek +' + formatMoney(pr.mortgage) + '</button>';
+        action = '<button type="button" class="debt-cta debt-cta-in" onclick="debtSellHouse(\'' + pr.id + '\')">Jual +' + formatMoney(refund) + '</button>';
+    } else if (!pr.mortgaged) {
+        const extra = buildingsOnGroup(pr.group) ? ' · jual set' : '';
+        action = '<button type="button" class="debt-cta debt-cta-in" onclick="debtMortgage(\'' + pr.id + '\')">Hipotek +' + formatMoney(pr.mortgage) + extra + '</button>';
     } else {
-        action = '<span class="debt-cta debt-cta-lock">Set ' + escapeHtml(meta.label) + '</span>';
+        action = '<span class="debt-cta debt-cta-lock">Sudah hipotek</span>';
     }
     return '<div class="debt-row"><div class="debt-row-strip" style="background:' + meta.color + '"></div>' +
         '<div class="debt-row-main"><p class="debt-row-name"><span class="code-badge" style="' + badgeStyle(pr.group) + '">' +
         escapeHtml(propCode(pr)) + '</span> ' + escapeHtml(pr.name) + '</p>' +
         '<p class="debt-row-meta">' + escapeHtml(debtBuildLabel(pr)) + '</p></div>' + action + '</div>';
 }
-function debtPayerHtml(d, payer, owner) {
+function debtPayerHtml(d, payer, owner, forBanker) {
     const owned = state.properties.filter(function (pr) { return pr.ownerId === payer.id; });
     const mortgagedN = owned.filter(function (pr) { return pr.mortgaged && !pr.hotel && !pr.houses; }).length;
     const active = owned.filter(function (pr) { return !(pr.mortgaged && !pr.hotel && !pr.houses); })
@@ -1492,10 +1522,15 @@ function debtPayerHtml(d, payer, owner) {
     const dense = active.length > 6 ? ' debt-list-dense' : '';
     const rows = active.map(debtAssetCardHtml).join('');
     const mortLine = mortgagedN ? '<p class="debt-mort-sum">Sudah hipotek · ' + mortgagedN + ' tanah</p>' : '';
-    return '<div class="role-card">' + debtHeaderHtml(debtDueSub(d, owner)) +
-        debtMeterHtml(payer, d.amount) +
+    const minBtn = forBanker
+        ? '<div class="debt-head-actions"><button type="button" class="debt-min-btn" onclick="toggleDebtBankerPanel()">' +
+            (debtBankerCollapsed ? 'Buka' : 'Ciutkan') + '</button></div>'
+        : '';
+    const sub = (forBanker ? escapeHtml(payer.name) + ' · ' : '') + debtDueSub(d, owner);
+    const body = '<div class="debt-dock-body">' + debtMeterHtml(payer, d.amount) +
         (rows ? '<div class="debt-list' + dense + '">' + rows + '</div>' : '<p class="debt-mort-sum">Tidak ada aset aktif</p>') +
         mortLine + '</div>';
+    return '<div class="role-card">' + debtHeaderHtml(sub, minBtn) + (debtBankerCollapsed && forBanker ? '' : body) + '</div>';
 }
 function debtWaitCardHtml(d, payer, owner, note) {
     return '<div class="role-card">' + debtHeaderHtml(debtDueSub(d, owner)) +
@@ -1511,23 +1546,37 @@ function maybeShowDebtOverlay() {
     const owner = d.ownerId === 'bank' ? null : getPlayer(d.ownerId);
     if (!payer || !debtPayerOk(d)) { hideDebtOverlay(); return; }
     if (payer.balance < d.amount && !canRaiseForDebt(payer.id)) {
+        if (isServerMode()) {
+            postCommand('completeDebt', {});
+            return;
+        }
         bankruptDebtFromState(d);
         return;
     }
-    hideRequestOverlay();
-    box.classList.remove('hidden');
     const me = isPlayer() ? (appSession && appSession.playerId) : null;
     if (me === d.payerId) {
-        box.innerHTML = debtPayerHtml(d, payer, owner);
+        hideRequestOverlay();
+        box.classList.remove('debt-dock', 'is-collapsed');
+        box.classList.remove('hidden');
+        box.innerHTML = debtPayerHtml(d, payer, owner, false);
     } else if (isBanker()) {
-        box.innerHTML = debtWaitCardHtml(d, payer, owner, 'Menunggu — ' + escapeHtml(payer.name));
+        box.classList.add('debt-dock');
+        box.classList.toggle('is-collapsed', debtBankerCollapsed);
+        box.classList.remove('hidden');
+        box.innerHTML = debtPayerHtml(d, payer, owner, true);
     } else {
+        box.classList.remove('debt-dock', 'is-collapsed');
+        box.classList.remove('hidden');
         const waitLine = debtKind(d) === 'pay_bank'
             ? escapeHtml(payer.name) + ' sedang hipotek untuk bayar ke bank'
             : escapeHtml(payer.name) + ' sedang hipotek untuk sewa ke ' + escapeHtml(owner ? owner.name : '?');
         box.innerHTML = debtWaitCardHtml(d, payer, owner, waitLine);
     }
     maybeToastDebtForOwner();
+}
+function toggleDebtBankerPanel() {
+    debtBankerCollapsed = !debtBankerCollapsed;
+    maybeShowDebtOverlay();
 }
 function debtSellHouse(propId) { sellHouse(propId); }
 function debtMortgage(propId) { mortgageProp(propId); }
@@ -1814,6 +1863,12 @@ function finishMoney(from, to, oldBalances, toastMsg, amount) {
     };
     state.lastFx = fx;
     markFxSeen(fx.id);
+    if (shouldSkipDebtRaiseFx(fx.type)) {
+        showToast(toastMsg || 'Aset dicairkan', 'success');
+        renderAll();
+        tryCompleteDebtSettlement();
+        return;
+    }
     playMoneyAnimation(fx);
 }
 function seenFxId() {
@@ -1821,6 +1876,10 @@ function seenFxId() {
 }
 function markFxSeen(id) {
     try { if (id) localStorage.setItem(FX_SEEN_KEY, id); } catch (e) {}
+}
+function shouldSkipDebtRaiseFx(type) {
+    if (!state.debtSettlement) return false;
+    return type === 'mortgage' || type === 'sell-build';
 }
 function maybePlayRemoteFx() {
     playLastFxIfNew();
@@ -1834,6 +1893,11 @@ function playLastFxIfNew() {
         if (!me || (fx.from !== me && fx.to !== me)) return;
     }
     markFxSeen(fx.id);
+    if (shouldSkipDebtRaiseFx(fx.type)) {
+        tryCompleteDebtSettlement();
+        maybeShowDebtOverlay();
+        return;
+    }
     playMoneyAnimation(fx);
 }
 
@@ -2453,8 +2517,12 @@ function openPropSheet(id) {
                 '<button type="button" class="btn btn-ghost mb-1.5" onclick="sellHouse(\'' + id + '\')"><i class="fa-solid fa-arrow-down"></i> Jual 1 rumah (50%)</button>';
         }
         actions += '<p class="section-label">Hipotek</p>';
-        if (!p.mortgaged) actions += '<button type="button" class="btn btn-mortgage mb-1.5" onclick="mortgageProp(\'' + id + '\')"><i class="fa-solid fa-file-invoice-dollar"></i> Hipotek +' + formatMoney(p.mortgage) + '</button>';
-        else actions += '<button type="button" class="btn btn-recv mb-1.5" onclick="unmortgageProp(\'' + id + '\')"><i class="fa-solid fa-unlock"></i> Tebus ' + formatMoney(Math.round(p.mortgage * 1.1)) + '</button>';
+        if (!p.mortgaged) {
+            const mortLabel = buildingsOnGroup(p.group)
+                ? 'Hipotek (jual bangunan set) +' + formatMoney(p.mortgage)
+                : 'Hipotek +' + formatMoney(p.mortgage);
+            actions += '<button type="button" class="btn btn-mortgage mb-1.5" onclick="mortgageProp(\'' + id + '\')"><i class="fa-solid fa-file-invoice-dollar"></i> ' + mortLabel + '</button>';
+        } else actions += '<button type="button" class="btn btn-recv mb-1.5" onclick="unmortgageProp(\'' + id + '\')"><i class="fa-solid fa-unlock"></i> Tebus ' + formatMoney(Math.round(p.mortgage * 1.1)) + '</button>';
         actions += '<p class="section-label">Perdagangan</p>' +
             '<button type="button" class="btn btn-xfer mb-2" onclick="transferProperty(\'' + id + '\')"><i class="fa-solid fa-handshake"></i> Serahkan aset</button>' +
             '<button type="button" class="btn btn-danger" onclick="returnToBank(\'' + id + '\')"><i class="fa-solid fa-building-columns"></i> Kembalikan ke bank</button>';
@@ -2560,7 +2628,6 @@ function canPlayerMortgage(propId) {
     const p = getProp(propId);
     const owner = p && getPlayer(p.ownerId);
     if (!p || !owner || p.mortgaged) return { ok: false, reason: 'Tidak bisa hipotek' };
-    if (p.houses > 0 || p.hotel || buildingsOnGroup(p.group)) return { ok: false, reason: 'Jual semua rumah di set dulu' };
     return { ok: true };
 }
 function canPlayerUnmortgage(propId) {
@@ -2610,41 +2677,82 @@ function buildHotel(propId) {
     finishMoney(owner.id, 'bank', old, 'Hotel dibangun', p.houseCost);
 }
 
-function sellHouse(propId) {
+function applySellHouseOnce(propId) {
     const p = getProp(propId);
     const owner = p && getPlayer(p.ownerId);
-    if (!p || !owner) return;
+    if (!p || !owner) return { ok: false, reason: 'Tidak ada pemilik' };
     const refund = Math.floor(p.houseCost / 2);
-    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, kind: 'sell' }); return; }
-    const old = snapshotBalances();
     if (p.hotel) {
-        if (!evenBuildOk(p, 4, false)) { showToast('Even-sell dulu set lain', 'error'); return; }
+        if (!evenBuildOk(p, 4, false)) return { ok: false, reason: 'Even-sell dulu set lain' };
         p.hotel = false;
         p.houses = 4;
         owner.balance += refund;
         pushTx({ type: 'sell-build', from: 'bank', to: owner.id, propertyId: p.id, amount: refund, reason: 'Turun hotel ' + p.name });
-    } else if (p.houses > 0) {
-        if (!evenBuildOk(p, p.houses - 1, false)) { showToast('Even-sell', 'error'); return; }
+        return { ok: true, refund: refund, owner: owner };
+    }
+    if (p.houses > 0) {
+        if (!evenBuildOk(p, p.houses - 1, false)) return { ok: false, reason: 'Even-sell' };
         p.houses -= 1;
         owner.balance += refund;
         pushTx({ type: 'sell-build', from: 'bank', to: owner.id, propertyId: p.id, amount: refund, reason: 'Jual rumah ' + p.name });
+        return { ok: true, refund: refund, owner: owner };
+    }
+    return { ok: false, reason: 'Tidak ada bangunan' };
+}
+
+function liquidateGroupBuildings(group) {
+    let guard = 0;
+    while (buildingsOnGroup(group) && guard < 80) {
+        guard += 1;
+        const list = groupProps(group);
+        let best = null;
+        let bestLvl = -1;
+        list.forEach(function (pr) {
+            const lvl = pr.hotel ? 5 : (pr.houses || 0);
+            if (lvl > bestLvl) {
+                bestLvl = lvl;
+                best = pr;
+            }
+        });
+        if (!best || bestLvl <= 0) return false;
+        const res = applySellHouseOnce(best.id);
+        if (!res.ok) return false;
+    }
+    return !buildingsOnGroup(group);
+}
+
+function sellHouse(propId) {
+    const p = getProp(propId);
+    const owner = p && getPlayer(p.ownerId);
+    if (!p || !owner) return;
+    if (p.hotel) {
+        if (!evenBuildOk(p, 4, false)) { showToast('Even-sell dulu set lain', 'error'); return; }
+    } else if (p.houses > 0) {
+        if (!evenBuildOk(p, p.houses - 1, false)) { showToast('Even-sell', 'error'); return; }
     } else { showToast('Tidak ada bangunan', 'error'); return; }
-    finishMoney('bank', owner.id, old, 'Dijual ke bank ' + formatMoney(refund), refund);
+    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, kind: 'sell' }); return; }
+    const old = snapshotBalances();
+    const res = applySellHouseOnce(propId);
+    if (!res.ok) { showToast(res.reason, 'error'); return; }
+    finishMoney('bank', owner.id, old, 'Dijual ke bank ' + formatMoney(res.refund), res.refund);
 }
 
 function mortgageProp(propId) {
     const p = getProp(propId);
     const owner = p && getPlayer(p.ownerId);
     if (!p || !owner || p.mortgaged) return;
-    if (p.houses > 0 || p.hotel || buildingsOnGroup(p.group)) {
-        showToast('Jual semua rumah di set dulu', 'error'); return;
-    }
     if (isServerMode()) { closeModal(); postCommand('mortgage', { propertyId: propId }); return; }
     const old = snapshotBalances();
-    p.mortgaged = true;
-    owner.balance += p.mortgage;
-    pushTx({ type: 'mortgage', from: 'bank', to: owner.id, propertyId: p.id, amount: p.mortgage, reason: 'Hipotek ' + p.name });
-    finishMoney('bank', owner.id, old, 'Hipotek ' + formatMoney(p.mortgage), p.mortgage);
+    if (!liquidateGroupBuildings(p.group)) {
+        showToast('Jual semua rumah di set dulu', 'error');
+        return;
+    }
+    const live = getProp(propId);
+    if (!live || live.mortgaged) return;
+    live.mortgaged = true;
+    owner.balance += live.mortgage;
+    pushTx({ type: 'mortgage', from: 'bank', to: owner.id, propertyId: live.id, amount: live.mortgage, reason: 'Hipotek ' + live.name });
+    finishMoney('bank', owner.id, old, 'Hipotek ' + formatMoney(live.mortgage), live.mortgage);
 }
 
 function unmortgageProp(propId) {
@@ -3703,7 +3811,10 @@ function openPropSheetPlayer(id) {
             actions += '<p class="section-label">Hipotek</p>';
             if (!p.mortgaged) {
                 const m = canPlayerMortgage(id);
-                actions += playerRuleBtn(m.ok, m.reason, 'btn-mortgage', 'fa-file-invoice-dollar', 'Request hipotek +' + formatMoney(p.mortgage), 'playerTryAsset(\'' + id + '\',\'mortgage\')');
+                const mortLabel = buildingsOnGroup(p.group)
+                    ? 'Request hipotek (jual bangunan set) +' + formatMoney(p.mortgage)
+                    : 'Request hipotek +' + formatMoney(p.mortgage);
+                actions += playerRuleBtn(m.ok, m.reason, 'btn-mortgage', 'fa-file-invoice-dollar', mortLabel, 'playerTryAsset(\'' + id + '\',\'mortgage\')');
             } else {
                 const u = canPlayerUnmortgage(id);
                 actions += playerRuleBtn(u.ok, u.reason, 'btn-recv', 'fa-unlock', 'Request tebus ' + formatMoney(redeem), 'playerTryAsset(\'' + id + '\',\'unmortgage\')');
@@ -3716,6 +3827,13 @@ function openPropSheetPlayer(id) {
         (p.hotel ? ' · Hotel' : (p.houses ? ' · ' + p.houses + ' rumah' : '')) + '</p>' + actions);
 }
 function playerTryAsset(propId, kind) {
+    const me = sessionPlayer();
+    const debtMine = !!(state.debtSettlement && me && state.debtSettlement.payerId === me.id);
+    if (debtMine && (kind === 'sell' || kind === 'mortgage')) {
+        if (kind === 'sell') sellHouse(propId);
+        else mortgageProp(propId);
+        return;
+    }
     let r = { ok: false, reason: 'Tidak valid' };
     if (kind === 'house') r = canPlayerBuildHouse(propId);
     else if (kind === 'hotel') r = canPlayerBuildHotel(propId);
@@ -3776,10 +3894,6 @@ function syncBankerRequestOverlay() {
         hideRequestOverlay();
         return;
     }
-    if (state.debtSettlement) {
-        hideRequestOverlay();
-        return;
-    }
     if (!isServerMode() || isPlayer() || roleGateOpen || moneyFxCanClose || resolvingRequestId) return;
     if (Date.now() < bankerPopupHoldUntil) return;
     if (shownRequestId) {
@@ -3793,10 +3907,6 @@ function syncBankerRequestOverlay() {
 }
 function maybeShowBankerRequestPopup() {
     if (gameIsOver()) {
-        hideRequestOverlay();
-        return;
-    }
-    if (state.debtSettlement) {
         hideRequestOverlay();
         return;
     }
