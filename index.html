@@ -132,6 +132,31 @@
         .sort-chip.active { background: var(--felt); color: #f4efe4; border-color: var(--felt); }
         #ackOverlay { z-index: 110; }
         #ackOverlay .ack-card { max-width: 340px; width: 100%; text-align: center; padding: 28px 22px; }
+        #deedFxLayer {
+            position: fixed; inset: 0; z-index: 130; display: none;
+            background: rgba(10, 12, 16, .88); backdrop-filter: blur(10px);
+            flex-direction: column; align-items: stretch; justify-content: stretch;
+        }
+        #deedFxLayer.open { display: flex; }
+        .deed-stage { flex: 1; min-height: 0; width: 100%; touch-action: none; position: relative; display: flex; align-items: center; justify-content: center; }
+        .deed-stage canvas.deed-3d {
+            position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+        }
+        .deed-stage canvas.deed-2d {
+            max-width: min(86vw, 380px); width: 100%; height: auto;
+            border-radius: 18px; box-shadow: 0 18px 50px rgba(0,0,0,.4);
+        }
+        .deed-close {
+            position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 14px; z-index: 2;
+            width: 44px; height: 44px; border-radius: 14px; border: none;
+            background: rgba(255,255,255,.12); color: #f4efe4; font-size: 18px; cursor: pointer;
+        }
+        .deed-hint {
+            position: absolute; left: 0; right: 0; text-align: center;
+            bottom: calc(16px + env(safe-area-inset-bottom));
+            color: rgba(244,239,228,.75); font-size: 12px; font-weight: 700; pointer-events: none;
+        }
+        .deed-detail-btn { min-height: 36px; width: auto; display: inline-flex; padding: 8px 12px; margin: 0 0 8px; }
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(10, 42, 32, .55); backdrop-filter: blur(8px);
             z-index: 60; display: flex; align-items: flex-end; justify-content: center; padding: 0;
@@ -603,6 +628,7 @@
     <div id="toastContainer"></div>
     <div id="ackOverlay" class="role-overlay role-pick hidden"></div>
     <div id="moneyFxLayer" aria-hidden="true"></div>
+    <div id="deedFxLayer" aria-hidden="true"></div>
 
 <script>
 const STORAGE_KEY = 'mb_v1_state';
@@ -1191,6 +1217,7 @@ function showView(name) {
 }
 
 function closeModal() {
+    if (typeof closeDeedViewer === 'function') closeDeedViewer();
     const box = document.getElementById('modalContainer');
     const overlay = box.querySelector('.modal-overlay');
     const content = box.querySelector('.modal-content');
@@ -2611,6 +2638,7 @@ function openPropSheet(id) {
 
     openModal('<div class="h-1.5 rounded-full mb-2" style="background:' + meta.color + '"></div>' +
         '<div class="text-lg font-extrabold mb-0.5 pr-10 leading-tight"><span class="code-badge align-middle mr-1">' + escapeHtml(propCode(p)) + '</span> ' + escapeHtml(p.name) + '</div>' +
+        '<button type="button" class="btn btn-ghost deed-detail-btn" onclick="openDeedViewer(\'' + id + '\')"><i class="fa-solid fa-circle-info"></i> Detail</button>' +
         '<p class="text-[11px] mb-2" style="color:var(--muted)">' + formatMoney(p.price) + ' · hipotek ' + formatMoney(p.mortgage) + ' · ' + rentText +
         (p.hotel ? ' · <i class="fa-solid fa-hotel"></i> Hotel' : (p.houses ? ' · ' + p.houses + ' rumah' : '')) + '</p>' + actions);
 }
@@ -3897,6 +3925,7 @@ function openPropSheetPlayer(id) {
     }
     openModal('<div class="h-1.5 rounded-full mb-2" style="background:' + tagBg + '"></div>' +
         '<div class="text-lg font-extrabold mb-0.5 pr-10 leading-tight"><span class="code-badge align-middle mr-1" style="background:' + tagBg + ';color:#fff">' + escapeHtml(propCode(p)) + '</span> ' + escapeHtml(p.name) + '</div>' +
+        '<button type="button" class="btn btn-ghost deed-detail-btn" onclick="openDeedViewer(\'' + id + '\')"><i class="fa-solid fa-circle-info"></i> Detail</button>' +
         '<p class="text-[11px] mb-2" style="color:var(--muted)">' + formatMoney(p.price) + ' · hipotek ' + formatMoney(p.mortgage) + ' · ' + rentText +
         (p.hotel ? ' · Hotel' : (p.houses ? ' · ' + p.houses + ' rumah' : '')) + '</p>' + actions);
 }
@@ -4348,6 +4377,8 @@ document.addEventListener('keydown', function (e) {
 });
 bootApp();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+<script src="deed-card.js"></script>
 </body>
 </html>
 
