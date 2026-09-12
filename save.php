@@ -251,6 +251,7 @@ if ($method === 'POST') {
         if ($op === 'rejectRequest') {
             $current['requests'][$idx]['status'] = 'rejected';
             $current['requests'][$idx]['resolvedAt'] = mb_now();
+            mb_set_reject_fx($current, $found);
             mb_bump($current);
             $ok = mb_write_state($fp, $current);
             flock($fp, LOCK_UN);

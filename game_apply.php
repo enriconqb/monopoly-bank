@@ -99,6 +99,44 @@ function mb_set_fx(&$s, $from, $to, $amount, $old, $tx) {
     );
 }
 
+function mb_request_label($req) {
+    $type = isset($req['type']) ? $req['type'] : '';
+    $payload = isset($req['payload']) && is_array($req['payload']) ? $req['payload'] : array();
+    $kind = isset($payload['kind']) ? $payload['kind'] : '';
+    if ($type === 'build' && $kind === 'hotel') {
+        return 'Bangun hotel';
+    }
+    if ($type === 'build' && $kind === 'sell') {
+        return 'Jual bangunan';
+    }
+    $map = array(
+        'go' => 'Request GO',
+        'pay_bank' => 'Bayar ke bank',
+        'recv_bank' => 'Terima dari bank',
+        'transfer' => 'Transfer pemain',
+        'rent' => 'Tagih sewa',
+        'buy' => 'Beli aset',
+        'build' => 'Bangun rumah',
+        'mortgage' => 'Hipotek',
+        'unmortgage' => 'Tebus hipotek',
+        'trade' => 'Tukar aset'
+    );
+    return isset($map[$type]) ? $map[$type] : 'Permintaan';
+}
+
+function mb_set_reject_fx(&$s, $req) {
+    $old = mb_balances($s);
+    $to = isset($req['playerId']) ? $req['playerId'] : '';
+    $payload = isset($req['payload']) && is_array($req['payload']) ? $req['payload'] : array();
+    $propId = isset($payload['propertyId']) ? $payload['propertyId'] : null;
+    $label = mb_request_label($req);
+    mb_set_fx($s, 'bank', $to, 0, $old, array(
+        'type' => 'reject',
+        'reason' => 'Permintaan ' . $label . ' ditolak',
+        'propertyId' => $propId
+    ));
+}
+
 function mb_group_props($s, $group) {
     $out = array();
     foreach ($s['properties'] as $p) {
@@ -980,7 +1018,8 @@ function mb_command(&$s, $kind, $in) {
         return mb_apply_rent_due($s, isset($in['payerId']) ? $in['payerId'] : '', $p['ownerId'], $amount, $p['id']);
     }
     if ($kind === 'build') {
-        return mb_apply_build($s, isset($in['propertyId']) ? $in['propertyId'] : '', isset($in['kind']) ? $in['kind'] : 'house');
+        $buildKind = isset($in['buildKind']) ? $in['buildKind'] : 'house';
+        return mb_apply_build($s, isset($in['propertyId']) ? $in['propertyId'] : '', $buildKind);
     }
     if ($kind === 'mortgage') {
         return mb_apply_mortgage($s, isset($in['propertyId']) ? $in['propertyId'] : '');

@@ -124,6 +124,14 @@
             font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 9999px;
             background: #eef3ef; color: var(--felt);
         }
+        .sort-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+        .sort-chip {
+            font-size: 11px; font-weight: 800; padding: 6px 12px; border-radius: 9999px;
+            border: 1.5px solid #d6d0c4; background: #fff; color: var(--muted); cursor: pointer;
+        }
+        .sort-chip.active { background: var(--felt); color: #f4efe4; border-color: var(--felt); }
+        #ackOverlay { z-index: 110; }
+        #ackOverlay .ack-card { max-width: 340px; width: 100%; text-align: center; padding: 28px 22px; }
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(10, 42, 32, .55); backdrop-filter: blur(8px);
             z-index: 60; display: flex; align-items: flex-end; justify-content: center; padding: 0;
@@ -593,6 +601,7 @@
     <div id="gameOverOverlay" class="role-overlay role-pick hidden"></div>
     <div id="modalContainer"></div>
     <div id="toastContainer"></div>
+    <div id="ackOverlay" class="role-overlay role-pick hidden"></div>
     <div id="moneyFxLayer" aria-hidden="true"></div>
 
 <script>
@@ -601,6 +610,7 @@ const SESSION_KEY = 'mb_v1_session';
 const FX_SEEN_KEY = 'mb_v1_lastFx';
 const SOUND_MUTE_KEY = 'mb_v1_soundMute';
 const WATCH_KEY = 'mb_v1_watchPlayer';
+const PLAYER_SORT_KEY = 'mb_v1_playerSort';
 const SAVE_URL = 'save.php';
 const PLAYER_COLORS = ['#D32F2F','#1565C0','#2E7D32','#F9A825','#6A1B9A','#E65100','#AD1457','#00695C','#4E342E','#37474F'];
 const GROUP_META = {
@@ -695,6 +705,8 @@ let lastSubmitFp = {};
 let enqueueBusy = false;
 let tradeUi = null;
 let resolvingRequestId = null;
+let skipRemoteFxOnce = false;
+let skipMoneyFxPlay = false;
 let saveInFlight = false;
 let bankerPopupHoldUntil = 0;
 let tradeGateOpen = false;
@@ -901,7 +913,7 @@ async function postOp(body) {
     }
 }
 async function postCommand(kind, extra) {
-    return postOp(Object.assign({ _op: 'command', kind: kind }, extra || {}));
+    return postOp(Object.assign({}, extra || {}, { _op: 'command', kind: kind }));
 }
 async function upsertRequestOnServer(req) {
     if (!req) return false;
@@ -1770,9 +1782,11 @@ function fxHeadline(fx) {
         if (type === 'unmortgage' && iPay) return { title: 'Kamu tebus hipotek', sub: propName };
         if (type === 'sell-build' && iGet) return { title: 'Kamu menjual bangunan', sub: propName };
         if (type === 'bangkrut' && iPay) return { title: 'Kamu bangkrut', sub: 'Aset kembali ke bank' };
+        if (type === 'reject') return { title: 'Permintaan ditolak', sub: reason };
         if (iPay) return { title: 'Kamu membayar', sub: reason || propName };
         if (iGet) return { title: 'Kamu menerima', sub: reason || propName };
     }
+    if (type === 'reject') return { title: 'Permintaan ditolak', sub: reason || (toN ? ('Untuk ' + toN) : '') };
     if (type === 'rent') return { title: fromN + ' membayar sewa ke ' + toN, sub: propName };
     if (type === 'buy') return { title: fromN + ' membeli properti', sub: propName };
     if (type === 'go') return { title: toN + ' menerima gaji GO', sub: '' };
@@ -1790,6 +1804,7 @@ function fxHeadline(fx) {
 function fxAmountMood(fx) {
     const me = isPlayer() ? (appSession && appSession.playerId) : null;
     if (!me) return 'neutral';
+    if (fx.type === 'reject' && fx.to === me) return 'down';
     if (fx.type === 'buy' && fx.from === me) return 'buy';
     if (fx.from === me && fx.to !== me) return 'down';
     if (fx.to === me && fx.from !== me) return 'up';
@@ -1819,7 +1834,7 @@ function playMoneyAnimation(opts) {
             '<p class="fx-ctx">' + escapeHtml(ctx.title) + '</p>' +
             (ctx.sub ? '<p class="fx-ctx-sub">' + escapeHtml(ctx.sub) + '</p>' : '') +
             propCard +
-            '<div class="fx-amount' + moodClass + '">' + arrow + formatMoney(amount) + '</div>' +
+            (type === 'reject' ? '' : '<div class="fx-amount' + moodClass + '">' + arrow + formatMoney(amount) + '</div>') +
             '<div class="fx-hint" id="fxHint"></div></div>' +
             fxPartyHtml(to, oldBalances, 'to') +
             '</div>';
@@ -1840,8 +1855,8 @@ function playMoneyAnimation(opts) {
         if (fromP && fromEl) tweenBalanceEl(fromEl, oldBalances[fromP.id], fromP.balance, skipMotion);
         if (toP && toEl) tweenBalanceEl(toEl, oldBalances[toP.id], toP.balance, skipMotion);
 
-        if (!skipMotion) flyBillsInModal();
-        playMoneyRoleSounds(from, to, type);
+        if (!skipMotion && type !== 'reject') flyBillsInModal();
+        if (type !== 'reject') playMoneyRoleSounds(from, to, type);
         const wait = skipMotion ? 80 : 1100;
         setTimeout(enableMoneyFxClose, wait);
     });
@@ -1863,6 +1878,12 @@ function finishMoney(from, to, oldBalances, toastMsg, amount) {
     };
     state.lastFx = fx;
     markFxSeen(fx.id);
+    if (skipMoneyFxPlay) {
+        skipMoneyFxPlay = false;
+        renderAll();
+        tryCompleteDebtSettlement();
+        return;
+    }
     if (shouldSkipDebtRaiseFx(fx.type)) {
         showToast(toastMsg || 'Aset dicairkan', 'success');
         renderAll();
@@ -1886,11 +1907,20 @@ function maybePlayRemoteFx() {
 }
 function playLastFxIfNew() {
     if (moneyFxCanClose) return;
+    if (skipRemoteFxOnce) {
+        skipRemoteFxOnce = false;
+        const fxSkip = state.lastFx;
+        if (fxSkip && fxSkip.id) markFxSeen(fxSkip.id);
+        return;
+    }
     const fx = state.lastFx;
     if (!fx || !fx.id || seenFxId() === fx.id) return;
     if (isPlayer()) {
         const me = appSession && appSession.playerId;
         if (!me || (fx.from !== me && fx.to !== me)) return;
+    } else if (fx.type === 'reject') {
+        markFxSeen(fx.id);
+        return;
     }
     markFxSeen(fx.id);
     if (shouldSkipDebtRaiseFx(fx.type)) {
@@ -1998,47 +2028,98 @@ function openWatchPlayerModal() {
     }
     const sel = getWatchPlayerId();
     openModal('<div class="text-xl font-extrabold mb-3 pr-10">Pantau pemain</div>' +
-        '<p class="text-xs mb-3" style="color:var(--muted)">Pilih pemain yang saldo namanya tampil di header</p>' +
+        '<p class="text-xs mb-3" style="color:var(--muted)">Pilih pemain yang tampil di header dan tab Pemain</p>' +
         '<div class="player-grid">' + playerGridHtml(sel, 'pickWatchPlayer', null) + '</div>');
 }
 function pickWatchPlayer(id) {
     setWatchPlayerId(id);
     closeModal();
-    renderPlayerHeader();
+    renderAll({ skipSave: true });
 }
 
 function ownedCount(playerId) {
     return state.properties.filter(p => p.ownerId === playerId).length;
 }
 
+function getPlayerSort() {
+    try {
+        const v = localStorage.getItem(PLAYER_SORT_KEY);
+        if (v === 'cash' || v === 'assets' || v === 'name') return v;
+    } catch (e) {}
+    return 'name';
+}
+function setPlayerSort(mode) {
+    try { localStorage.setItem(PLAYER_SORT_KEY, mode); } catch (e) {}
+    if (isPlayer()) renderPlayerHome();
+    else renderPlayersView();
+}
+function sortedPlayers() {
+    const mode = getPlayerSort();
+    return state.players.slice().sort(function (a, b) {
+        if (mode === 'cash' && b.balance !== a.balance) return b.balance - a.balance;
+        if (mode === 'assets') {
+            const d = ownedCount(b.id) - ownedCount(a.id);
+            if (d) return d;
+        }
+        return String(a.name || '').localeCompare(String(b.name || ''), 'id');
+    });
+}
+function playerSortBarHtml() {
+    const mode = getPlayerSort();
+    function chip(id, label) {
+        return '<button type="button" class="sort-chip' + (mode === id ? ' active' : '') + '" onclick="setPlayerSort(\'' + id + '\')">' + label + '</button>';
+    }
+    return '<div class="sort-bar mb-2">' + chip('name', 'Abjad') + chip('cash', 'Uang') + chip('assets', 'Aset') + '</div>';
+}
+function playerCardsHtml(clickable) {
+    return playerSortBarHtml() + '<div class="space-y-2 mb-4">' + sortedPlayers().map(function (p) {
+        const br = p.bankrupt ? ' bankrupt' : '';
+        const tag = clickable ? 'button type="button"' : 'div';
+        const close = clickable ? 'button' : 'div';
+        const extra = clickable
+            ? ' data-player-id="' + p.id + '" onclick="openPlayerSheet(\'' + p.id + '\')"'
+            : ' style="cursor:default"';
+        return '<' + tag + ' class="player-card' + br + '"' + extra + '>' +
+            '<div class="player-avatar" style="background:' + p.color + '">' + escapeHtml(p.name.charAt(0).toUpperCase()) + '</div>' +
+            '<div class="flex-1 min-w-0"><p class="font-extrabold truncate">' +
+            (clickable ? escapeHtml(p.name) : '<span class="name-badge" style="background:' + p.color + ';color:' + textOnColor(p.color) + '">' + escapeHtml(p.name) + '</span>') +
+            (p.bankrupt ? ' <span class="badge" style="background:#fee2e2;color:#dc2626">Bangkrut</span>' : '') + '</p>' +
+            '<p class="player-balance font-extrabold text-lg ' + (p.balance >= 0 ? 'text-green-600' : 'text-red-500') + '">' +
+            (p.balance < 0 ? '-' : '') + formatMoney(p.balance) + '</p></div>' +
+            '<span class="chip">' + ownedCount(p.id) + ' aset</span>' +
+            (clickable ? '<i class="fa-solid fa-chevron-right" style="color:#c5c0b4"></i>' : '') +
+            '</' + close + '>';
+    }).join('') + '</div>';
+}
+
 function renderPlayersView() {
     const el = document.getElementById('view-players');
-    const total = state.players.reduce((s, p) => s + p.balance, 0);
-    const active = activePlayers().length;
-    let body = '<div class="hero-card mb-4">' +
-        '<div><p class="text-[11px] font-bold uppercase tracking-wider opacity-80">Total uang pemain</p>' +
-        '<p class="text-2xl font-extrabold mt-1" id="heroTotal">' + formatMoney(total) + '</p></div>' +
-        '<div class="text-right"><p class="text-[11px] font-bold uppercase tracking-wider opacity-80">Aktif</p>' +
-        '<p class="text-2xl font-extrabold">' + active + '</p></div></div>';
     if (!state.players.length) {
-        body += '<div class="empty-card">' +
+        el.innerHTML = '<div class="empty-card">' +
             '<p class="text-3xl mb-2"><i class="fa-solid fa-dice" style="color:var(--felt)"></i></p>' +
             '<p class="font-bold" style="color:var(--muted)">Belum ada pemain</p>' +
             '<button type="button" onclick="openAddPlayerModal()" class="btn btn-recv mt-4"><i class="fa-solid fa-user-plus"></i> Tambah pemain</button></div>';
-    } else {
-        body += '<div class="space-y-2">' + state.players.map(p => {
-            const br = p.bankrupt ? ' bankrupt' : '';
-            return '<button type="button" class="player-card' + br + '" data-player-id="' + p.id + '" onclick="openPlayerSheet(\'' + p.id + '\')">' +
-                '<div class="player-avatar" style="background:' + p.color + '">' + escapeHtml(p.name.charAt(0).toUpperCase()) + '</div>' +
-                '<div class="flex-1 min-w-0"><p class="font-extrabold truncate">' + escapeHtml(p.name) +
-                (p.bankrupt ? ' <span class="badge" style="background:#fee2e2;color:#dc2626">Bangkrut</span>' : '') + '</p>' +
-                '<p class="player-balance font-extrabold text-lg ' + (p.balance >= 0 ? 'text-green-600' : 'text-red-500') + '">' +
-                (p.balance < 0 ? '-' : '') + formatMoney(p.balance) + '</p></div>' +
-                '<span class="chip">' + ownedCount(p.id) + ' aset</span>' +
-                '<i class="fa-solid fa-chevron-right" style="color:#c5c0b4"></i></button>';
-        }).join('') + '</div>';
+        return;
     }
-    el.innerHTML = body;
+    const me = watchedPlayer();
+    if (!me) {
+        el.innerHTML = '<div class="empty-card mb-4"><p class="font-bold mb-2">Pilih pemain untuk dipantau</p>' +
+            '<button type="button" class="btn btn-recv" onclick="openWatchPlayerModal()">Pantau pemain</button></div>' +
+            playerCardsHtml(true);
+        return;
+    }
+    const ink = textOnColor(me.color);
+    const canAct = !me.bankrupt && !gameIsOver();
+    el.innerHTML = '<div class="hero-card mb-4"><div><span class="name-badge" style="background:' + me.color + ';color:' + ink + '">' + escapeHtml(me.name) +
+        '</span><p class="text-2xl font-extrabold mt-2">' + formatMoney(me.balance) + '</p></div>' +
+        '<div class="text-right">' + (me.bankrupt ? '<span class="badge" style="background:#fee2e2;color:#dc2626">Bangkrut</span>' : '<span class="player-chip">PANTAU</span>') + '</div></div>' +
+        (canAct ? '<div class="quick-action-grid mb-4">' +
+            '<button type="button" class="qa qa-go" onclick="openGoModal(\'' + me.id + '\')"><i class="fa-solid fa-flag-checkered"></i>GO</button>' +
+            '<button type="button" class="qa qa-pay" onclick="openPayBankModal(\'' + me.id + '\')"><i class="fa-solid fa-building-columns"></i>Bayar</button>' +
+            '<button type="button" class="qa qa-recv" onclick="openReceiveBankModal(\'' + me.id + '\')"><i class="fa-solid fa-hand-holding-dollar"></i>Terima</button>' +
+            '<button type="button" class="qa qa-xfer" onclick="openTransferModal(\'' + me.id + '\')"><i class="fa-solid fa-arrow-right-arrow-left"></i>Transfer</button></div>' :
+            '<p class="empty-card text-sm mb-3">' + (gameIsOver() ? 'Permainan telah berakhir.' : 'Pemain bangkrut (mode lihat).') + '</p>') +
+        playerCardsHtml(true);
 }
 
 function renderAssetCatalog(el, opts) {
@@ -2652,7 +2733,7 @@ function buildHouse(propId) {
     if (!evenBuildOk(p, p.houses + 1, false)) { showToast('Even-build: rata dulu', 'error'); return; }
     if (houseStock().houses >= 32) { showToast('Stok rumah habis', 'error'); return; }
     if (!canAfford(owner, p.houseCost)) return;
-    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, kind: 'house' }); return; }
+    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, buildKind: 'house' }); return; }
     const old = snapshotBalances();
     owner.balance -= p.houseCost;
     p.houses += 1;
@@ -2668,7 +2749,7 @@ function buildHotel(propId) {
     if (!evenBuildOk(p, 0, true)) { showToast('Even-build hotel', 'error'); return; }
     if (houseStock().hotels >= 12) { showToast('Stok hotel habis', 'error'); return; }
     if (!canAfford(owner, p.houseCost)) return;
-    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, kind: 'hotel' }); return; }
+    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, buildKind: 'hotel' }); return; }
     const old = snapshotBalances();
     owner.balance -= p.houseCost;
     p.houses = 0;
@@ -2730,7 +2811,7 @@ function sellHouse(propId) {
     } else if (p.houses > 0) {
         if (!evenBuildOk(p, p.houses - 1, false)) { showToast('Even-sell', 'error'); return; }
     } else { showToast('Tidak ada bangunan', 'error'); return; }
-    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, kind: 'sell' }); return; }
+    if (isServerMode()) { closeModal(); postCommand('build', { propertyId: propId, buildKind: 'sell' }); return; }
     const old = snapshotBalances();
     const res = applySellHouseOnce(propId);
     if (!res.ok) { showToast(res.reason, 'error'); return; }
@@ -3624,14 +3705,7 @@ function renderPlayerHome() {
             '<button type="button" class="qa qa-xfer" onclick="playerRequestXfer()"><i class="fa-solid fa-arrow-right-arrow-left"></i>Transfer</button>' +
             '<button type="button" class="qa qa-trade" onclick="playerRequestTrade()"><i class="fa-solid fa-handshake"></i>Tukar aset</button></div>' :
             '<p class="empty-card text-sm mb-3">' + (gameIsOver() ? 'Permainan telah berakhir.' : 'Mode lihat saja (bangkrut).') + '</p>') +
-        '<div class="space-y-2 mb-4">' + state.players.map(function (p) {
-            const br = p.bankrupt ? ' bankrupt' : '';
-            return '<div class="player-card' + br + '" style="cursor:default"><div class="player-avatar" style="background:' + p.color + '">' +
-                escapeHtml(p.name.charAt(0).toUpperCase()) + '</div><div class="flex-1"><p class="font-extrabold">' +
-                '<span class="name-badge" style="background:' + p.color + ';color:' + textOnColor(p.color) + '">' + escapeHtml(p.name) + '</span>' +
-                (p.bankrupt ? ' <span class="badge" style="background:#fee2e2;color:#dc2626">Bangkrut</span>' : '') + '</p>' +
-                '<p class="text-sm font-bold mt-1">' + formatMoney(p.balance) + '</p></div></div>';
-        }).join('') + '</div>';
+        playerCardsHtml(false);
 }
 
 function renderPlayerAssets() {
@@ -3934,6 +4008,44 @@ function maybeShowBankerRequestPopup() {
         '<button type="button" class="btn btn-recv"' + (busy ? ' disabled' : '') + ' onclick="approveRequest(\'' + req.id + '\')">Setujui</button>' +
         '<button type="button" class="btn btn-danger"' + (busy ? ' disabled' : '') + ' onclick="rejectRequest(\'' + req.id + '\')">Tolak</button></div></div>';
 }
+function requestAckMessage(req, approved) {
+    const th = requestTheme(req && req.type, (req && req.payload) ? req.payload.kind : '');
+    const label = (req && req.type === 'go') ? 'Request GO' : (th.title || 'Permintaan');
+    if (approved) return 'Permintaan ' + label + ' Berhasil';
+    return 'Permintaan ' + label + ' ditolak';
+}
+function hideBankerAck() {
+    const box = document.getElementById('ackOverlay');
+    if (!box) return;
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    box.onclick = null;
+}
+function showBankerAck(message) {
+    const box = document.getElementById('ackOverlay');
+    if (!box) return;
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="role-card ack-card"><p class="text-xl font-extrabold">' + escapeHtml(message) +
+        '</p><p class="text-xs mt-3" style="color:var(--muted)">Ketuk layar untuk menutup</p></div>';
+    box.onclick = function () { hideBankerAck(); };
+}
+function setRejectFx(req) {
+    const p = req ? getPlayer(req.playerId) : null;
+    const old = snapshotBalances();
+    const fx = {
+        id: generateId(),
+        from: 'bank',
+        to: req ? req.playerId : '',
+        amount: 0,
+        oldBalances: old,
+        at: Date.now(),
+        type: 'reject',
+        reason: requestAckMessage(req, false),
+        propertyId: (req && req.payload && req.payload.propertyId) || null
+    };
+    state.lastFx = fx;
+    return fx;
+}
 function approveRequest(id) {
     if (isPlayer()) return;
     resolveRequest(id, true);
@@ -3947,8 +4059,9 @@ async function resolveRequest(id, approve) {
     resolvingRequestId = id;
     hideRequestOverlay();
     bankerPopupHoldUntil = Date.now() + 450;
+    const pendingReq = (state.requests || []).find(function (r) { return r.id === id; });
     if (!isServerMode()) {
-        const req = (state.requests || []).find(function (r) { return r.id === id; });
+        const req = pendingReq;
         if (!req || req.status !== 'pending') {
             showToast('Sudah diproses di perangkat lain', 'success');
             resolvingRequestId = null;
@@ -3956,24 +4069,37 @@ async function resolveRequest(id, approve) {
             return;
         }
         if (approve) {
+            skipMoneyFxPlay = true;
             const ok = applyApprovedRequest(req);
-            if (!ok) { resolvingRequestId = null; return; }
+            if (!ok) {
+                skipMoneyFxPlay = false;
+                resolvingRequestId = null;
+                return;
+            }
             req.status = 'approved';
             req.resolvedAt = Date.now();
         } else {
             req.status = 'rejected';
             req.resolvedAt = Date.now();
-            showToast('Permintaan ditolak', 'success');
+            const fx = setRejectFx(req);
+            markFxSeen(fx.id);
         }
         renderAll({ skipSave: true, skipBankerPopup: true });
         saveState();
+        showBankerAck(requestAckMessage(req, approve));
         resolvingRequestId = null;
         setTimeout(function () { maybeShowBankerRequestPopup(); }, 450);
         return;
     }
+    skipRemoteFxOnce = true;
     const data = await postOp({ _op: approve ? 'commitRequest' : 'rejectRequest', id: id });
-    if (!data || !data.ok) showToast((data && data.error) || 'Gagal memproses', 'error');
-    else if (!approve) showToast('Permintaan ditolak', 'success');
+    if (!data || !data.ok) {
+        skipRemoteFxOnce = false;
+        showToast((data && data.error) || 'Gagal memproses', 'error');
+    } else {
+        if (state.lastFx && state.lastFx.id) markFxSeen(state.lastFx.id);
+        showBankerAck(requestAckMessage(pendingReq || { type: 'go' }, approve));
+    }
     resolvingRequestId = null;
     setTimeout(function () { maybeShowBankerRequestPopup(); }, 450);
 }
