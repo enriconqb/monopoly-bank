@@ -1,8 +1,10 @@
-/* global THREE, gsap, GROUP_META, getProp, formatMoney, reduceMotion, textOnColor */
+/* global THREE, gsap, GROUP_META, getProp, formatMoney, reduceMotion, textOnColor, propCode */
 
 (function () {
     const W = 768;
     const H = 1152;
+    const CARD_W = 2.35;
+    const CARD_H = 3.52;
     const GOLD = '#c9a227';
     const CREAM = '#f6f0e4';
     const INK = '#1c1408';
@@ -104,6 +106,36 @@
         ];
     }
 
+    function wrapTitle(ctx, text, maxW, maxSize, minSize) {
+        const raw = String(text || '').toUpperCase().trim();
+        const font = function (s) { return '800 ' + s + 'px "Plus Jakarta Sans", system-ui, sans-serif'; };
+        function fits(lines, s) {
+            ctx.font = font(s);
+            return lines.every(function (ln) { return ctx.measureText(ln).width <= maxW; });
+        }
+        function trySplit(s) {
+            const words = raw.split(/\s+/).filter(Boolean);
+            if (!words.length) return [''];
+            if (fits([raw], s)) return [raw];
+            for (let i = 1; i < words.length; i++) {
+                const a = words.slice(0, i).join(' ');
+                const b = words.slice(i).join(' ');
+                if (fits([a, b], s)) return [a, b];
+            }
+            const mid = Math.ceil(raw.length / 2);
+            let cut = mid;
+            const sp = raw.lastIndexOf(' ', mid);
+            if (sp > 4) cut = sp;
+            return [raw.slice(0, cut).trim(), raw.slice(cut).trim()].filter(Boolean);
+        }
+        for (let s = maxSize; s >= minSize; s--) {
+            const lines = trySplit(s);
+            if (fits(lines, s)) return { lines: lines, size: s };
+        }
+        ctx.font = font(minSize);
+        return { lines: trySplit(minSize).slice(0, 2), size: minSize };
+    }
+
     function paintFront(p) {
         const c = document.createElement('canvas');
         c.width = W;
@@ -112,6 +144,7 @@
         const meta = GROUP_META[p.group] || { color: '#1a237e' };
         const header = meta.color;
         const inkHead = textOnColor(header);
+        const code = typeof propCode === 'function' ? propCode(p) : '';
 
         ctx.fillStyle = CREAM;
         roundRect(ctx, 0, 0, W, H, 36);
@@ -125,7 +158,7 @@
         roundRect(ctx, 32, 32, W - 64, H - 64, 22);
         ctx.stroke();
 
-        const hx = 48, hy = 48, hw = W - 96, hh = 220;
+        const hx = 48, hy = 48, hw = W - 96, hh = 236;
         ctx.fillStyle = header;
         roundRect(ctx, hx, hy, hw, hh, 14);
         ctx.fill();
@@ -134,18 +167,44 @@
         roundRect(ctx, hx + 10, hy + 10, hw - 20, hh - 20, 10);
         ctx.stroke();
 
+        const badgeR = 34;
+        const bx = hx + hw - 28;
+        const by = hy + 36;
+        ctx.beginPath();
+        ctx.arc(bx, by, badgeR, 0, Math.PI * 2);
+        ctx.fillStyle = header;
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = GOLD;
+        ctx.stroke();
+        ctx.fillStyle = CREAM;
+        ctx.beginPath();
+        ctx.arc(bx, by, badgeR - 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = header;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '800 22px "Plus Jakarta Sans", system-ui, sans-serif';
+        ctx.fillText(code, bx, by + 1);
+        ctx.textBaseline = 'alphabetic';
+
         ctx.fillStyle = inkHead;
         ctx.textAlign = 'center';
-        ctx.font = '700 22px "Plus Jakarta Sans", system-ui, sans-serif';
-        ctx.fillText('TITLE DEED', W / 2, hy + 58);
-        ctx.font = '800 44px "Plus Jakarta Sans", system-ui, sans-serif';
-        const name = String(p.name || '').toUpperCase();
-        ctx.fillText(name.length > 22 ? name.slice(0, 20) + '…' : name, W / 2, hy + 122);
-        ctx.font = '600 18px "Plus Jakarta Sans", system-ui, sans-serif';
-        ctx.fillText(subtitleFor(p), W / 2, hy + 168);
+        ctx.font = '700 20px "Plus Jakarta Sans", system-ui, sans-serif';
+        ctx.fillText('MONOPOLY ENQB', W / 2, hy + 52);
+        const titleMax = hw - 100;
+        const wrapped = wrapTitle(ctx, p.name, titleMax, 42, 24);
+        ctx.font = '800 ' + wrapped.size + 'px "Plus Jakarta Sans", system-ui, sans-serif';
+        const lineGap = wrapped.size + 6;
+        const startY = wrapped.lines.length === 1 ? hy + 118 : hy + 118 - lineGap / 2;
+        wrapped.lines.forEach(function (ln, i) {
+            ctx.fillText(ln, W / 2, startY + i * lineGap);
+        });
+        ctx.font = '600 16px "Plus Jakarta Sans", system-ui, sans-serif';
+        ctx.fillText(subtitleFor(p), W / 2, hy + 198);
 
         const x = 88;
-        let y = 340;
+        let y = 352;
         rentRows(p).forEach(function (row) {
             drawLeaderRow(ctx, row[0], row[1], x, y, W - 176);
             y += 52;
@@ -349,8 +408,7 @@
         host.appendChild(renderer.domElement);
 
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40);
-        camera.position.z = 7.2;
+        const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 80);
 
         const texF = new THREE.CanvasTexture(paintFront(p));
         const texB = new THREE.CanvasTexture(paintBack());
@@ -367,7 +425,7 @@
         const frontMat = makeHoloMat(texF);
         const backMat = makeHoloMat(texB);
         const edgeMat = new THREE.MeshStandardMaterial({ color: 0xc9a227, metalness: 0.9, roughness: 0.28 });
-        const geo = new THREE.BoxGeometry(2.35, 3.52, 0.045);
+        const geo = new THREE.BoxGeometry(CARD_W, CARD_H, 0.045);
         const card = new THREE.Mesh(geo, [edgeMat, edgeMat, edgeMat, edgeMat, frontMat, backMat]);
         card.rotation.y = 0.12;
         card.rotation.x = -0.06;
@@ -377,8 +435,9 @@
         dir.position.set(2.4, 3.2, 4);
         scene.add(dir);
 
-        const idle = { x: -0.06, y: 0.12, z: 0, px: 0, py: 0, s: 1 };
-        const pose = { x: idle.x, y: idle.y, z: 0, px: 0, py: 0, s: 1 };
+        const idle = { x: -0.06, y: 0.12, z: 0, s: 1 };
+        const pose = { x: idle.x, y: idle.y, z: 0, s: 1 };
+        card.position.set(0, 0, 0);
         card.scale.set(0.2, 0.2, 0.2);
         if (typeof gsap !== 'undefined') {
             gsap.to(card.scale, { x: 1, y: 1, z: 1, duration: 0.55, ease: 'back.out(1.6)' });
@@ -386,18 +445,23 @@
             card.scale.set(1, 1, 1);
         }
 
-        const ptr = { down: false, mode: null, sx: 0, sy: 0, lx: 0, ly: 0, t0: 0, hold: null };
+        const ptr = { down: false, sx: 0, sy: 0, lx: 0, ly: 0 };
         let gloss = 0;
         let vel = 0;
 
-        function size() {
+        function fitCamera() {
             const w = host.clientWidth || window.innerWidth;
             const h = host.clientHeight || window.innerHeight;
             renderer.setSize(w, h, false);
             camera.aspect = w / Math.max(h, 1);
+            const fov = camera.fov * Math.PI / 180;
+            const margin = 1.22;
+            const distH = (CARD_H * margin / 2) / Math.tan(fov / 2);
+            const distW = (CARD_W * margin / 2) / (Math.tan(fov / 2) * camera.aspect);
+            camera.position.z = Math.max(distH, distW, 4);
             camera.updateProjectionMatrix();
         }
-        size();
+        fitCamera();
 
         function onDown(e) {
             if (e.button != null && e.button !== 0) return;
@@ -405,12 +469,8 @@
             e.stopPropagation();
             host.setPointerCapture(e.pointerId);
             ptr.down = true;
-            ptr.mode = null;
             ptr.sx = ptr.lx = e.clientX;
             ptr.sy = ptr.ly = e.clientY;
-            ptr.t0 = performance.now();
-            clearTimeout(ptr.hold);
-            ptr.hold = setTimeout(function () { if (ptr.down) ptr.mode = 'rotate'; }, 160);
         }
         function onMove(e) {
             if (!ptr.down) return;
@@ -419,44 +479,29 @@
             const dy = e.clientY - ptr.ly;
             ptr.lx = e.clientX;
             ptr.ly = e.clientY;
-            const dist = Math.hypot(e.clientX - ptr.sx, e.clientY - ptr.sy);
-            if (!ptr.mode && dist > 14) {
-                ptr.mode = (performance.now() - ptr.t0) < 160 ? 'pan' : 'rotate';
-            }
             vel = Math.min(1, vel + Math.hypot(dx, dy) * 0.02);
+            pose.y += dx * 0.012;
+            pose.x += dy * 0.01;
+            pose.x = Math.max(-0.85, Math.min(0.85, pose.x));
+            pose.y = Math.max(-2.8, Math.min(2.8, pose.y));
             const w = host.clientWidth || 1;
-            const h = host.clientHeight || 1;
-            if (ptr.mode === 'pan') {
-                pose.px += dx * 0.008;
-                pose.py -= dy * 0.008;
-                pose.px = Math.max(-1.6, Math.min(1.6, pose.px));
-                pose.py = Math.max(-1.1, Math.min(1.1, pose.py));
-            } else if (ptr.mode === 'rotate') {
-                pose.y += dx * 0.012;
-                pose.x += dy * 0.01;
-                pose.x = Math.max(-0.85, Math.min(0.85, pose.x));
-                pose.y = Math.max(-2.8, Math.min(2.8, pose.y));
-            }
-            frontMat.uniforms.uPointer.value.set((e.clientX / w) * 2 - 1, 1 - (e.clientY / h) * 2);
+            const hh = host.clientHeight || 1;
+            frontMat.uniforms.uPointer.value.set((e.clientX / w) * 2 - 1, 1 - (e.clientY / hh) * 2);
             backMat.uniforms.uPointer.value.copy(frontMat.uniforms.uPointer.value);
         }
         function onUp(e) {
             if (e) e.stopPropagation();
             ptr.down = false;
-            ptr.mode = null;
-            clearTimeout(ptr.hold);
             if (typeof gsap !== 'undefined') {
-                gsap.to(pose, {
-                    x: idle.x, y: idle.y, z: 0, px: 0, py: 0,
-                    duration: 0.7, ease: 'power3.out'
-                });
+                gsap.to(pose, { x: idle.x, y: idle.y, z: 0, duration: 0.7, ease: 'power3.out' });
             } else {
-                Object.assign(pose, { x: idle.x, y: idle.y, px: 0, py: 0 });
+                pose.x = idle.x;
+                pose.y = idle.y;
             }
         }
         function onWheel(e) {
             e.preventDefault();
-            pose.s = Math.max(0.82, Math.min(1.45, pose.s + (e.deltaY > 0 ? -0.06 : 0.06)));
+            pose.s = Math.max(0.9, Math.min(1.08, pose.s + (e.deltaY > 0 ? -0.04 : 0.04)));
             if (typeof gsap !== 'undefined') gsap.to(card.scale, { x: pose.s, y: pose.s, z: pose.s, duration: 0.2 });
             else card.scale.setScalar(pose.s);
         }
@@ -466,7 +511,7 @@
         host.addEventListener('pointerup', onUp);
         host.addEventListener('pointercancel', onUp);
         host.addEventListener('wheel', onWheel, { passive: false });
-        const onResize = size;
+        const onResize = fitCamera;
         window.addEventListener('resize', onResize);
 
         const clock = new THREE.Clock();
@@ -478,7 +523,7 @@
             gloss += (vel - gloss) * 0.12;
             card.rotation.x = pose.x;
             card.rotation.y = pose.y;
-            card.position.set(pose.px, pose.py, 0);
+            card.position.set(0, 0, 0);
             frontMat.uniforms.uTime.value = t;
             backMat.uniforms.uTime.value = t;
             frontMat.uniforms.uGloss.value = gloss;
